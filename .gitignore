@@ -1,0 +1,10 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs/Spectrum
+/packages/System.Configuration.ConfigurationManager.10.0.1
+/Spectrum/bin
+/Spectrum/obj
+/Spectrum.Tests/bin
+/Spectrum.Tests/obj
