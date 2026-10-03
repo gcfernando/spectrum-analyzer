@@ -7,8 +7,9 @@ A .NET Framework 4.8 Windows Forms application that captures your system's audio
 - **83-bar frequency spectrum** covering 20 Hz – 20 kHz on a logarithmic scale, with a labelled frequency axis (horizontal, bottom) and a labelled level axis (vertical, 0 to -72 dBFS, both sides)
 - **Reference gridlines** at -12/-24/-36/-48/-60 dBFS drawn inside each bar for at-a-glance level reading
 - **Measured band levels** — each bar is the integrated power of its frequency band in dBFS (see *Measurement*)
-- **8 visualization modes** selectable via `App.config`
-- **5 colour themes** selectable via `App.config`, independent of mode
+- **9 visualization modes** selectable at runtime, with an initial value from `App.config`
+- **6 colour themes** selectable at runtime, independent of mode, with an initial value from `App.config`
+- **Live mode and theme selectors** in the title bar; changes apply immediately without restarting
 - **Heat-map colour gradient** with peak markers tinted to match their theme's colour at that height
 - **Peak-hold markers** with configurable hold time and decay
 - **Asymmetric ballistics** — fast attack, slower release per mode
@@ -16,27 +17,31 @@ A .NET Framework 4.8 Windows Forms application that captures your system's audio
 - **Silence detection** — bars fade out gracefully when no audio is playing
 - **Auto device recovery** — restores capture automatically when the default audio device changes
 - **Scaling layout** — bars and labels are laid out from the window's client size (the process does not declare per-monitor DPI awareness, so Windows scales it on high-DPI monitors)
+- **Keyboard shortcuts** — `Ctrl+M` cycles visualization modes; `Ctrl+T` cycles colour themes
 - **F12 toggle** — toggle always-on-top
 - **Single-instance** — uses a named mutex to prevent multiple instances
 
 ## Visualization Modes
 
-Set the `Mode` key in `App.config`:
+Choose a visualization mode from the **Mode** selector in the title bar to change it immediately. The
+supported modes are:
 
 | Mode | Best For |
 |---|---|
-| `Spectrum` (default) | All-around; real-time frequency analysis |
-| `Bricks` | Retro block aesthetic; 80s/Synthwave music |
+| `Spectrum` (fallback) | All-around; real-time frequency analysis |
+| `Bricks` (configured startup mode) | Retro block aesthetic; 80s/Synthwave music |
 | `LED` | Professional peak meter; recording studios |
 | `Dots` | Smooth minimal style; ambient music |
 | `Wave` | Flowing organic motion; lo-fi / chill-hop |
 | `Pulse` | Breathing hypnotic effect; meditation / downtempo |
 | `Center` | Energy from centre; orchestral / cinematic |
 | `Mirror` | Symmetrical balance; EDM / house music |
+| `Glow` | Soft level-driven halo with a bright core; a visual treatment only, not beat detection |
 
 ## Colour Themes
 
-Set the `Theme` key in `App.config`. Themes control only the bar colour palette and are independent of, and composable with, any `Mode` above.
+Choose a palette from the **Theme** selector in the title bar to change bar colours immediately. Themes
+control only the bar colour palette and are independent of, and composable with, any `Mode` above.
 
 | Theme | Palette | Best For |
 |---|---|---|
@@ -45,14 +50,17 @@ Set the `Theme` key in `App.config`. Themes control only the bar colour palette 
 | `Sunset` | Dark amber → orange → red, pale gold peak | Warm, vibrant, sunset-inspired visuals |
 | `MonoCyan` | Single-hue cyan, brightness-graded, pale cyan peak | Clean, modern, monochrome/studio look |
 | `Synthwave` | Purple → magenta → pink, electric-cyan peak | 80s retro, synthwave, neon party visuals |
+| `Aurora` | Deep teal → emerald → cyan, pale violet peak | Cool, luminous ambient visuals |
 
 ## Configuration
 
-Edit `App.config` in the project directory:
+`App.config` still supplies the initial mode and theme when the application starts:
+
+Runtime selections apply immediately for the current session and do not modify `App.config`.
 
 ```xml
 <appSettings>
-  <add key="Mode" value="Spectrum"/>
+  <add key="Mode" value="Bricks"/>
   <add key="Theme" value="ClassicSmooth"/>
 </appSettings>
 ```

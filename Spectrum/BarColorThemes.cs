@@ -68,12 +68,21 @@ internal static class BarColorThemes
         peak: Color.FromArgb(120, 230, 255),
         intensityCurve: 1.5f);
 
+    // Northern-lights ramp: emerald through teal and cyan to a pale lavender peak.
+    public static readonly BarColorTheme Aurora = new(
+        low: Color.FromArgb(20, 110, 70),
+        mid: Color.FromArgb(0, 190, 155),
+        high: Color.FromArgb(70, 220, 235),
+        peak: Color.FromArgb(220, 200, 255),
+        intensityCurve: 1.5f);
+
     public static BarColorTheme Resolve(string name) => (name ?? string.Empty).Trim().ToLowerInvariant() switch
     {
         "ice" => Ice,
         "sunset" => Sunset,
         "monocyan" or "mono" or "monochromecyan" => MonoCyan,
         "synthwave" => Synthwave,
+        "aurora" => Aurora,
         _ => ClassicSmooth, // "classicsmooth", "classic", "", or unrecognized
     };
 }

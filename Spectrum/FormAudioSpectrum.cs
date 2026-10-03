@@ -12,6 +12,14 @@ public partial class FormAudioSpectrum : Form
 {
     private const int BAR_COUNT = 83;
     private const int NOISE_GATE_THRESHOLD = 2;
+    private static readonly string[] s_visualModes =
+    {
+        "Spectrum", "Bricks", "LED", "Dots", "Wave", "Pulse", "Center", "Mirror", "Glow"
+    };
+    private static readonly string[] s_colorThemes =
+    {
+        "ClassicSmooth", "Ice", "Sunset", "MonoCyan", "Synthwave", "Aurora"
+    };
 
     // Default "Spectrum" (analyzer) mode presentation ballistics, all driven by elapsed time.
     // Attack: a full-scale (72 dB) rise completes in 45 ms, about 1.5 analysis hops (~32 ms each), so the bar interpolates
@@ -61,6 +69,12 @@ public partial class FormAudioSpectrum : Form
     private BandPlan _layoutPlan;
     private string _visualMode;
     private string _barTheme;
+    private ComboBox _modeSelector;
+    private ComboBox _themeSelector;
+    private FlowLayoutPanel _selectionPanel;
+    private Label _modeSelectorLabel;
+    private Label _themeSelectorLabel;
+    private bool _initializingSelectors;
     private readonly byte[] _spectrumBuffer;
     private readonly byte[] _applyBuffer;
 
@@ -84,21 +98,51 @@ public partial class FormAudioSpectrum : Form
             true);
 
         UpdateStyles();
+        InitializeSelectionControls();
     }
 
     private void FormAudioSpectrum_KeyUp(object sender, KeyEventArgs e)
     {
         if (e.KeyCode == Keys.F12)
+        {
             TopMost = !TopMost;
+            return;
+        }
+
+        if (e.Control && e.KeyCode == Keys.M)
+        {
+            SelectNextItem(_modeSelector);
+            e.Handled = true;
+        }
+        else if (e.Control && e.KeyCode == Keys.T)
+        {
+            SelectNextItem(_themeSelector);
+            e.Handled = true;
+        }
+    }
+
+    private static void SelectNextItem(ComboBox selector)
+    {
+        if (selector.Items.Count == 0) return;
+        selector.SelectedIndex = (selector.SelectedIndex + 1) % selector.Items.Count;
     }
 
     private void FormAudioSpectrum_Load(object sender, EventArgs e)
     {
-        _visualMode = ConfigurationManager.AppSettings["Mode"];
-        _visualMode = string.IsNullOrWhiteSpace(_visualMode) ? "Spectrum" : _visualMode.Trim();
+        var configuredMode = ConfigurationManager.AppSettings["Mode"];
+        _visualMode = ResolveConfiguredMode(configuredMode);
+        _barTheme = ResolveConfiguredTheme(ConfigurationManager.AppSettings["Theme"]);
 
-        _barTheme = ConfigurationManager.AppSettings["Theme"];
-        _barTheme = string.IsNullOrWhiteSpace(_barTheme) ? "ClassicSmooth" : _barTheme.Trim();
+        _initializingSelectors = true;
+        try
+        {
+            _modeSelector.SelectedItem = _visualMode;
+            _themeSelector.SelectedItem = _barTheme;
+        }
+        finally
+        {
+            _initializingSelectors = false;
+        }
 
         InitializeBarsOptimized(_visualMode);
         CenterToScreen();
@@ -111,6 +155,178 @@ public partial class FormAudioSpectrum : Form
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
         Taskbar.SetState(Handle, Taskbar.TaskbarStates.NoProgress);
+    }
+
+    private void InitializeSelectionControls()
+    {
+        _selectionPanel = new FlowLayoutPanel
+        {
+            BackColor = Color.Transparent,
+            FlowDirection = FlowDirection.LeftToRight,
+            Location = new Point(0, 7),
+            Name = "selectionPanel",
+            Size = new Size(348, 25),
+            TabIndex = 1,
+            WrapContents = false,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+
+        _modeSelectorLabel = new Label
+        {
+            AutoSize = false,
+            ForeColor = Color.FromArgb(215, 210, 196),
+            Font = ambiance_ThemeSpectrum.Font,
+            Text = "&Mode",
+            TextAlign = ContentAlignment.MiddleLeft,
+            Size = new Size(39, 24),
+            Margin = new Padding(0, 0, 0, 0)
+        };
+
+        _modeSelector = CreateSelector("modeSelector", 98, s_visualModes);
+        _modeSelector.AccessibleName = "Visualization mode";
+        _modeSelector.AccessibleDescription = "Press Ctrl+M to cycle visualization modes";
+        _modeSelector.TabIndex = 0;
+
+        _themeSelectorLabel = new Label
+        {
+            AutoSize = false,
+            ForeColor = Color.FromArgb(215, 210, 196),
+            Font = ambiance_ThemeSpectrum.Font,
+            Text = "&Theme",
+            TextAlign = ContentAlignment.MiddleLeft,
+            Size = new Size(45, 24),
+            Margin = new Padding(7, 0, 0, 0)
+        };
+
+        _themeSelector = CreateSelector("themeSelector", 140, s_colorThemes);
+        _themeSelector.AccessibleName = "Bar color theme";
+        _themeSelector.AccessibleDescription = "Press Ctrl+T to cycle bar color themes";
+        _themeSelector.TabIndex = 1;
+
+        _selectionPanel.Controls.Add(_modeSelectorLabel);
+        _selectionPanel.Controls.Add(_modeSelector);
+        _selectionPanel.Controls.Add(_themeSelectorLabel);
+        _selectionPanel.Controls.Add(_themeSelector);
+        _modeSelector.SelectedIndexChanged += ModeSelector_SelectedIndexChanged;
+        _themeSelector.SelectedIndexChanged += ThemeSelector_SelectedIndexChanged;
+        ambiance_ThemeSpectrum.Controls.Add(_selectionPanel);
+        PositionSelectionPanel();
+        ambiance_ThemeSpectrum.SizeChanged += (s, e) => PositionSelectionPanel();
+    }
+
+    private ComboBox CreateSelector(string name, int width, string[] choices)
+    {
+        var selector = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.FromArgb(38, 35, 29),
+            ForeColor = Color.FromArgb(235, 232, 225),
+            Font = ambiance_ThemeSpectrum.Font,
+            Name = name,
+            Size = new Size(width, 24),
+            Margin = new Padding(0, 0, 0, 0),
+            IntegralHeight = true,
+            MaxDropDownItems = 10
+        };
+        foreach (var choice in choices)
+            selector.Items.Add(choice);
+        return selector;
+    }
+
+    private void PositionSelectionPanel()
+    {
+        if (_selectionPanel == null) return;
+        var width = ambiance_ThemeSpectrum.ClientSize.Width;
+        var compact = width < 800;
+        _modeSelectorLabel.Visible = !compact;
+        _themeSelectorLabel.Visible = !compact;
+        _modeSelector.Width = compact ? 80 : 98;
+        _themeSelector.Width = compact ? 92 : 140;
+        _selectionPanel.Width = compact ? 179 : 348;
+        _selectionPanel.Location = new Point(
+            Math.Max(60, width - _selectionPanel.Width - 16),
+            7);
+        ambiance_ThemeSpectrum.Text = width < 460
+            ? string.Empty
+            : width < 920 ? "Spectrum" : "Audio Spectrum Analyzer";
+    }
+
+    private static string ResolveConfiguredChoice(string configuredValue, string[] choices, string fallback)
+    {
+        var normalized = (configuredValue ?? string.Empty).Trim();
+        foreach (var choice in choices)
+        {
+            if (string.Equals(choice, normalized, StringComparison.OrdinalIgnoreCase))
+                return choice;
+        }
+        return fallback;
+    }
+
+    private static string ResolveConfiguredMode(string configuredValue)
+    {
+        if (string.IsNullOrWhiteSpace(configuredValue))
+            return "Spectrum";
+
+        var normalized = configuredValue.Trim();
+        switch (normalized.ToLowerInvariant())
+        {
+            case "ppmi i":
+            case "ppmi i b":
+            case "ppmi i a":
+            case "ppmi i bbc":
+            case "ppmii":
+            case "ppm2":
+            case "iec2":
+            case "bbc":
+            case "ebu":
+                return "LED";
+            default:
+                return ResolveConfiguredChoice(normalized, s_visualModes, "Bricks");
+        }
+    }
+
+    private static string ResolveConfiguredTheme(string configuredValue)
+    {
+        var normalized = (configuredValue ?? string.Empty).Trim();
+        if (string.Equals(normalized, "mono", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "monochromecyan", StringComparison.OrdinalIgnoreCase))
+            return "MonoCyan";
+
+        return ResolveConfiguredChoice(normalized, s_colorThemes, "ClassicSmooth");
+    }
+
+    private void ModeSelector_SelectedIndexChanged(object sender, EventArgs e)
+    {
+        if (_initializingSelectors || _progressBars == null || !(_modeSelector.SelectedItem is string mode))
+            return;
+
+        _visualMode = mode;
+        var theme = BarColorThemes.Resolve(_barTheme);
+        for (var i = 0; i < _progressBars.Length; i++)
+        {
+            var progress = _progressBars[i];
+            progress.Tag = $"{mode}|{i + 1}";
+            ApplyMeterPresetOptimized(progress, mode);
+            ApplyColorThemeOptimized(progress, theme);
+            progress.Invalidate();
+        }
+
+        RecalculateBarLayout();
+    }
+
+    private void ThemeSelector_SelectedIndexChanged(object sender, EventArgs e)
+    {
+        if (_initializingSelectors || _progressBars == null || !(_themeSelector.SelectedItem is string themeName))
+            return;
+
+        _barTheme = themeName;
+        var theme = BarColorThemes.Resolve(themeName);
+        foreach (var progress in _progressBars)
+        {
+            ApplyColorThemeOptimized(progress, theme);
+            progress.Invalidate();
+        }
     }
 
     private void InitializeBarsOptimized(string visualMode)
@@ -647,6 +863,13 @@ public partial class FormAudioSpectrum : Form
                 progress.ResponseTimeMs = 130;
                 progress.ReleaseTimeMs = 520;
                 progress.PeakHoldMilliseconds = 0;
+                break;
+
+            case "glow":
+                progress.UseAsymmetricBallistics = true;
+                progress.ResponseTimeMs = 95;
+                progress.ReleaseTimeMs = 420;
+                progress.PeakHoldMilliseconds = 160;
                 break;
 
             default:

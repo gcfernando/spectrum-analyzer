@@ -59,6 +59,9 @@ public sealed class VerticalProgressBar : ProgressBar
     private SolidBrush _backgroundBrush;
     private readonly SolidBrush _workBrush = new(Color.Black);
     private readonly SolidBrush _brickShadeBrush = new(Color.FromArgb(65, 0, 0, 0));
+    private readonly SolidBrush _glowOuterBrush = new(Color.FromArgb(30, Color.Cyan));
+    private readonly SolidBrush _glowMiddleBrush = new(Color.FromArgb(90, Color.Cyan));
+    private readonly SolidBrush _glowCoreBrush = new(Color.FromArgb(235, Color.Cyan));
     private SolidBrush _brickHighlightBrush;
     private readonly Pen _borderPen = new(Color.FromArgb(120, 0, 0, 0), 1f);
 
@@ -80,6 +83,7 @@ public sealed class VerticalProgressBar : ProgressBar
         Mirror,
         Wave,
         Pulse,
+        Glow,
         Spectrum
     }
 
@@ -116,6 +120,7 @@ public sealed class VerticalProgressBar : ProgressBar
             "mirror"          => VisualizationMode.Mirror,
             "wave"            => VisualizationMode.Wave,
             "pulse"           => VisualizationMode.Pulse,
+            "glow"            => VisualizationMode.Glow,
             "spectrum"        => VisualizationMode.Spectrum,
             _                 => VisualizationMode.Bricks,
         };
@@ -335,6 +340,9 @@ public sealed class VerticalProgressBar : ProgressBar
             _gridlinePen?.Dispose();
             _workBrush?.Dispose();
             _brickShadeBrush?.Dispose();
+            _glowOuterBrush?.Dispose();
+            _glowMiddleBrush?.Dispose();
+            _glowCoreBrush?.Dispose();
             _wavePen?.Dispose();
         }
         base.Dispose(disposing);
@@ -449,6 +457,9 @@ public sealed class VerticalProgressBar : ProgressBar
                 break;
             case VisualizationMode.Pulse:
                 DrawMode_Pulse(e.Graphics, bounds, fillPercent);
+                break;
+            case VisualizationMode.Glow:
+                DrawMode_Glow(e.Graphics, innerX, innerW, topInner, bottomInner, filledH, fillPercent);
                 break;
             default:
                 DrawMode_Spectrum(e.Graphics, bounds);
@@ -721,6 +732,34 @@ public sealed class VerticalProgressBar : ProgressBar
                 g.FillRectangle(_workBrush, brickRect);
             }
         }
+    }
+
+    private void DrawMode_Glow(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int filledH, float fillPercent)
+    {
+        if (filledH <= 0)
+            return;
+
+        var fillTop = Math.Max(topInner, bottomInner - filledH);
+        var fillHeight = bottomInner - fillTop;
+        if (fillHeight <= 0)
+            return;
+
+        // Layer translucent bands inside this control's clip to create a contained halo around a bright core.
+        // Reusing the brushes keeps the paint path allocation-free; the level color follows the active theme.
+        var color = GetLevelColor(fillPercent);
+        _glowOuterBrush.Color = Color.FromArgb(30, color);
+        _glowMiddleBrush.Color = Color.FromArgb(90, color);
+        _glowCoreBrush.Color = Color.FromArgb(235, color);
+
+        g.FillRectangle(_glowOuterBrush, innerX, fillTop, innerW, fillHeight);
+
+        if (innerW > 2)
+            g.FillRectangle(_glowMiddleBrush, innerX + 1, fillTop, innerW - 2, fillHeight);
+
+        if (innerW > 4)
+            g.FillRectangle(_glowCoreBrush, innerX + 2, fillTop, innerW - 4, fillHeight);
+        else
+            g.FillRectangle(_glowCoreBrush, innerX, fillTop, innerW, fillHeight);
     }
 
     private void DrawMode_Spectrum(Graphics g, Rectangle bounds)
