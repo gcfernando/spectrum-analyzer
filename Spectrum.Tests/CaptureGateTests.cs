@@ -2,7 +2,7 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
-/// <summary>Analysis-timer decisions: silence, stalls, BASS errors, gaps and stream changes.</summary>
+/// <summary>Analysis-timer decisions for silence, stalls, BASS errors, gaps, and stream changes.</summary>
 public class CaptureGateTests
 {
     private const int Required = 4;
@@ -26,7 +26,7 @@ public class CaptureGateTests
     [Fact]
     public void BassError_NeverReachesTheHangDetector_AndSettlesToSilence()
     {
-        // Regression: a constant −1 level (device not started) used to look like a stuck level and reset the device.
+        // A constant −1 level used to look like a stall and trigger a reset.
         var gate = new CaptureGate(Required);
         for (var t = 1; t <= 50; t++)
         {
@@ -41,7 +41,7 @@ public class CaptureGateTests
     {
         var gate = new CaptureGate(Required);
         gate.Next(5000, 1500, StreamA, 0);
-        var d = gate.Next(5000, 1500, StreamA, 0); // callback did not run between these two ticks
+        var d = gate.Next(5000, 1500, StreamA, 0); // No callback ran between these ticks.
         Assert.Equal(CaptureAction.Analyze, d.Action);
         Assert.Equal(CaptureAction.Analyze, gate.Next(5000, 3000, StreamA, 0).Action);
         Assert.Equal(0, gate.GapEndFrame);
@@ -50,19 +50,19 @@ public class CaptureGateTests
     [Fact]
     public void ConfirmedStall_PublishesSilenceAndMarksTheGap()
     {
-        // Regression: after a pause, pre-pause audio was analysed as if contiguous with the resumed audio.
+        // Gap handling must keep pre-pause audio separate from resumed audio.
         var gate = new CaptureGate(Required);
         gate.Next(5000, 9000, StreamA, 0);
         CaptureDecision d = default;
         for (var t = 0; t < Required; t++)
         {
-            d = gate.Next(5000, 9000, StreamA, 0); // loopback delivers nothing while paused
+            d = gate.Next(5000, 9000, StreamA, 0); // No frames while paused.
         }
 
         Assert.Equal(CaptureAction.PublishSilence, d.Action);
         Assert.Equal(9000, gate.GapEndFrame);
 
-        // Playback resumes: analysed again, and the gap stays in force for the history before it.
+        // Playback resumes; the earlier gap remains in force.
         Assert.Equal(CaptureAction.Analyze, gate.Next(5000, 10500, StreamA, 0).Action);
         Assert.Equal(9000, gate.GapEndFrame);
     }
@@ -84,7 +84,7 @@ public class CaptureGateTests
     [Fact]
     public void QuietTicksFollowedByOneLateCallback_AreNotAGap()
     {
-        // Zero level with frames flowing, then a single tick where the callback was late: not a gap.
+        // One late callback with flowing audio is not a gap.
         var gate = new CaptureGate(Required);
         for (var t = 1; t < Required; t++)
         {
@@ -98,7 +98,7 @@ public class CaptureGateTests
     [Fact]
     public void ZeroLevelWithFramesFlowing_IsSilenceWithoutAGap()
     {
-        // Digital silence is still delivered; the history is continuous, so there is nothing to exclude.
+        // Silence is valid; continuous history means no gap.
         var gate = new CaptureGate(Required);
         CaptureDecision d = default;
         for (var t = 1; t <= Required; t++)
@@ -117,7 +117,7 @@ public class CaptureGateTests
         var gate = new CaptureGate(Required);
         gate.Next(5000, 20000, StreamA, 0);
 
-        // Device recovered, same history reused: capture restarted at frame 20000.
+        // Recovery reuses the same history; capture restarts at 20000.
         var d = gate.Next(5000, 20000, StreamB, 20000);
         Assert.Equal(CaptureAction.Analyze, d.Action);
         Assert.Equal(20000, gate.GapEndFrame);
@@ -128,8 +128,7 @@ public class CaptureGateTests
     [Fact]
     public void SteadySignal_WithConstantLevel_NeverTriggersRecovery()
     {
-        // Regression (live defect D1): a steady tone has a bit-identical peak level every tick. With frames flowing
-        // that is a healthy stream, not a hang; the old rule reset the device every ~0.3 s.
+        // A steady tone with flowing frames is healthy, not a hang.
         var gate = new CaptureGate(Required, HangThreshold);
         for (var t = 1; t <= 500; t++)
         {
@@ -154,15 +153,15 @@ public class CaptureGateTests
             }
         }
 
-        Assert.Equal(1, recoveries); // a stale level during a long pause cannot cause a recovery loop
+        Assert.Equal(1, recoveries); // A stale level during a long pause cannot restart recovery.
 
-        // Recovery produced a new stream that is also stalled: still no second recovery until frames flow.
+        // Recovery created another stalled stream; no second reset until frames flow.
         for (var t = 0; t < 50; t++)
         {
             Assert.False(gate.Next(5000, 1520, StreamB, 1520).RecoverDevice);
         }
 
-        // Frames flow again, then a new stall with a frozen level: recovery is re-armed.
+        // Frames resume; a new frozen stall re-arms recovery.
         gate.Next(5000, 3040, StreamB, 1520);
         var rearmed = false;
         for (var t = 0; t < 20; t++)
@@ -180,12 +179,12 @@ public class CaptureGateTests
         gate.Next(0, 1520, StreamA, 0);
         for (var t = 0; t < 50; t++)
         {
-            Assert.False(gate.Next(0, 1520, StreamA, 0).RecoverDevice); // nothing playing: silence, not a hang
+            Assert.False(gate.Next(0, 1520, StreamA, 0).RecoverDevice); // Silence is not a hang.
         }
 
         for (var t = 0; t < 50; t++)
         {
-            Assert.False(gate.Next(1000 + t, 1520, StreamA, 0).RecoverDevice); // level still moving
+            Assert.False(gate.Next(1000 + t, 1520, StreamA, 0).RecoverDevice); // Level is still changing.
         }
     }
 
@@ -199,6 +198,6 @@ public class CaptureGateTests
         }
 
         Assert.Equal(CaptureAction.Analyze, gate.Next(5000, 9000, StreamA, 0).Action);
-        Assert.Equal(CaptureAction.Analyze, gate.Next(0, 10500, StreamA, 0).Action); // count restarted
+        Assert.Equal(CaptureAction.Analyze, gate.Next(0, 10500, StreamA, 0).Action); // Quiet-count reset.
     }
 }

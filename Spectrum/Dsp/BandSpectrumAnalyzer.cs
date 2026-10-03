@@ -22,56 +22,24 @@ internal sealed class BandDiagnostic
     public double Normalized { get; set; }
 }
 
-/// <summary>
-/// Measures integrated band power for a <see cref="BandPlan"/> from raw interleaved PCM samples.
-///
-/// Per analysis frame, for each FFT length in use:
-/// <list type="number">
-/// <item>take the most recent N frames of each analysed channel;</item>
-/// <item>remove the window-weighted mean (DC only — no other spectral shaping);</item>
-/// <item>apply a periodic Hann window and FFT;</item>
-/// <item>one-sided bin power P[k] = 2·|X[k]|² / (N·Σw²) (factor 1 at Nyquist). By Parseval, Σ P[k] equals the
-///   window-weighted mean square of the signal, so summing bins gives signal power for tones and noise alike
-///   and is free of scalloping loss once a band spans the window main lobe;</item>
-/// <item>channel strategy: mean of the per-channel powers of the front pair (L, R). This is total stereo energy
-///   normalized so L = R reads the same as mono; anti-phase content cannot cancel;</item>
-/// <item>band power = Σ weight[k]·P[k] where weight is the fraction of bin k's interval [(k−½)Δf, (k+½)Δf]
-///   lying inside the band, so every bin's power is assigned exactly once across adjacent bands;</item>
-/// <item>divide by 0.5 (power of a full-scale sine) → relative power; 0 dBFS = full-scale sine.</item>
-/// </list>
-///
-/// Multi-resolution: each band uses the shortest window whose resolution fs/N puts at least
-/// <see cref="MinBinsPerBand"/> bins in the band (the null-to-null width of the Hann main lobe), else the longest.
-/// Short windows cut latency for mid/high bands; the longest window keeps the finest bass resolution.
-/// Band power has the same meaning at every length, so levels are consistent across the transition.
-/// Window lengths are defined in time (about 85/171/341 ms), so behaviour is the same at 44.1, 48 or 96 kHz.
-/// Known limit: for a tone within about two coarse bins of a band edge where the window length changes, the coarser
-/// window's wider main lobe crosses the edge into a band measured with the finer window, so up to ~13 % of the tone's
-/// power is counted twice or not at all: the tone reads within about ±0.6 dB there at 44.1/48 kHz and ±1 dB at
-/// 22.05/32 kHz (bounded by the sweep tests; measured independently).
-/// Everywhere else the bands partition the power exactly (±0.1 dB in the tests).
-///
-/// Zero padding: where bands are narrower than one bin (deep bass, below the physical resolution), the window is
-/// zero-padded (at most 4x) so every band holds at least one interpolated bin. This samples the true DTFT of the
-/// windowed frame more densely, so the lobe peak of a tone lands in the band that contains the tone. It does
-/// not improve resolution: an unresolved tone still lights a cluster of neighbouring bars.
-///
-/// Not thread-safe: one instance per analysis thread. <see cref="Analyze"/> does not allocate.
-/// </summary>
+/// <summary>Measures full-scale-sine-relative band power from interleaved PCM using windowed FFTs and overlapping-bin weights.</summary>
+/// <remarks>Each band selects a short window with at least four Hann main-lobe bins when possible; zero padding densifies bins but does not improve resolution.</remarks>
+/// <remarks>The front two channels are averaged independently, preventing anti-phase cancellation; bands partition each bin's power by frequency overlap.</remarks>
+/// <remarks>Window changes can cause small power errors near band edges; one instance is intended for a single analysis thread, and Analyze allocates no memory.</remarks>
 internal sealed class BandSpectrumAnalyzer
 {
-    /// <summary>Hann main-lobe width (null to null) in bins.</summary>
+    /// <summary>Hann main-lobe width from null to null, in bins.</summary>
     public const double MinBinsPerBand = 4.0;
 
-    /// <summary>Power of a full-scale sine (A²/2 with A = 1).</summary>
+    /// <summary>Mean-square power of a full-scale sine.</summary>
     public const double FullScaleSinePower = 0.5;
 
-    /// <summary>Window lengths at 48 kHz: about 85 ms, 171 ms and 341 ms.</summary>
+    /// <summary>Reference window lengths for 48 kHz.</summary>
     public static readonly IReadOnlyList<int> ReferenceWindowLengths = new[] { 4096, 8192, 16384 };
 
     public const int ReferenceSampleRate = 48000;
 
-    /// <summary>Largest zero-padding factor applied to a window.</summary>
+    /// <summary>Maximum zero-padding factor.</summary>
     public const int MaxZeroPadding = 4;
 
     private readonly Resolution[] _resolutions;
@@ -125,7 +93,7 @@ internal sealed class BandSpectrumAnalyzer
         _resolutions = new Resolution[lengths.Count];
         for (var i = 0; i < lengths.Count; i++)
         {
-            // The narrowest band served by this window decides the zero padding (1 when every band spans >= 1 bin).
+            // Pad enough to give the narrowest assigned band at least one bin.
             var narrowest = double.MaxValue;
             for (var b = 0; b < plan.Count; b++)
             {
@@ -156,16 +124,13 @@ internal sealed class BandSpectrumAnalyzer
     public int Channels { get; }
     public int AnalysedChannels { get; }
 
-    /// <summary>Number of most-recent frames <see cref="Analyze"/> needs (the longest window).</summary>
+    /// <summary>Most recent frames required by <see cref="Analyze"/>.</summary>
     public int RequiredFrames { get; }
 
-    /// <summary>Analysis window length (time resolution) used for a band.</summary>
+    /// <summary>Window length used to analyze a band.</summary>
     public int GetWindowLength(int band) => _resolutions[_bandResolution[band]].WindowLength;
 
-    /// <summary>
-    /// Window lengths for a sample rate: the 48 kHz reference lengths scaled by the nearest power of two of
-    /// fs / 48 kHz, so window durations (and therefore latency and resolution in Hz) stay roughly constant.
-    /// </summary>
+    /// <summary>Scales reference window lengths by the nearest power of two to preserve approximate duration.</summary>
     public static int[] DefaultWindowLengths(int sampleRate)
     {
         var scale = Math.Pow(2, Math.Round(Math.Log((double)sampleRate / ReferenceSampleRate, 2)));
@@ -178,12 +143,7 @@ internal sealed class BandSpectrumAnalyzer
         return lengths;
     }
 
-    /// <summary>
-    /// Analyse the most recent <see cref="RequiredFrames"/> frames ending at <paramref name="frameCount"/>
-    /// in <paramref name="interleaved"/> (frame-interleaved, <see cref="Channels"/> samples per frame).
-    /// Writes band power relative to a full-scale sine into <paramref name="relativeBandPower"/>.
-    /// Non-finite samples are treated as 0.
-    /// </summary>
+    /// <summary>Analyzes recent interleaved frames and writes each band's power relative to a full-scale sine.</summary>
     public void Analyze(float[] interleaved, int frameCount, double[] relativeBandPower)
     {
         if (interleaved == null)
@@ -256,7 +216,7 @@ internal sealed class BandSpectrumAnalyzer
         var df = (double)fs / n;
         var half = n / 2;
 
-        // Bin k represents [(k − ½)Δf, (k + ½)Δf]; the Nyquist bin only [(N/2 − ½)Δf, N/2·Δf].
+        // Each bin spans its midpoint boundaries; the Nyquist bin ends at Nyquist.
         var first = Math.Max(1, (int)Math.Floor((fb.LowerHz / df) + 0.5));
         var last = Math.Min(half, (int)Math.Ceiling((fb.UpperHz / df) - 0.5));
         if (last < first)
@@ -296,7 +256,7 @@ internal sealed class BandSpectrumAnalyzer
             Array.Clear(im, 0, n);
         }
 
-        // Zero padding (if any): everything after the window is zero.
+        // Clear the zero-padded portion of each FFT input.
         if (n > res.WindowLength)
         {
             Array.Clear(re, res.WindowLength, n - res.WindowLength);
@@ -312,7 +272,7 @@ internal sealed class BandSpectrumAnalyzer
 
         if (AnalysedChannels == 2)
         {
-            // Two real signals packed as re + j·im: X_L[k] = (Z[k] + Z*[N−k]) / 2, X_R[k] = (Z[k] − Z*[N−k]) / 2j.
+            // Separate the two real-channel spectra packed into one complex transform.
             for (var k = 1; k <= half; k++)
             {
                 var a = re[k];
@@ -323,7 +283,7 @@ internal sealed class BandSpectrumAnalyzer
                 var left = (((a + c) * (a + c)) + ((bIm - d) * (bIm - d))) * 0.25;
                 var right = (((bIm + d) * (bIm + d)) + ((a - c) * (a - c))) * 0.25;
 
-                // Mean of channel powers, one-sided (×2) except at Nyquist.
+                // Average channel powers and apply one-sided scaling except at Nyquist.
                 var oneSided = k == half ? 1.0 : 2.0;
                 power[k] = oneSided * 0.5 * (left + right) * scale;
             }
@@ -352,7 +312,7 @@ internal sealed class BandSpectrumAnalyzer
             weightedSum += window[i] * x;
         }
 
-        // Subtract the window-weighted mean so the windowed frame has exactly zero DC (no DC leakage into low bands).
+        // Remove the window-weighted mean to prevent DC leakage into low bands.
         var mean = weightedSum / windowSum;
         for (var i = 0; i < n; i++)
         {
@@ -373,8 +333,7 @@ internal sealed class BandSpectrumAnalyzer
             Im = new double[fftLength];
             Power = new double[(fftLength / 2) + 1];
 
-            // Periodic Hann: w[n] = 0.5 − 0.5·cos(2πn/N). Coherent gain 0.5, ENBW 1.5 bins, main lobe ±2 bins,
-            // first sidelobe −31.5 dB falling 18 dB/octave: low leakage for music with a large dynamic range.
+            // The periodic Hann window limits spectral leakage in signals with a wide dynamic range.
             for (var i = 0; i < length; i++)
             {
                 var w = 0.5 - (0.5 * Math.Cos(2.0 * Math.PI * i / length));

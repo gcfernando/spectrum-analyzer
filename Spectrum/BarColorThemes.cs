@@ -2,11 +2,7 @@ using System.Drawing;
 
 namespace Spectrum;
 
-/// <summary>
-/// Named color palettes for the bar heat-map (low -&gt; mid -&gt; high -&gt; peak), selected via the
-/// <c>Theme</c> key in App.config. Independent of <c>Mode</c>, which controls animation/shape: a palette
-/// can be combined with any visualization mode.
-/// </summary>
+/// <summary>Named heat-map palettes selected by the App.config Theme key and usable with any visualization mode.</summary>
 internal readonly struct BarColorTheme
 {
     public Color Low { get; }
@@ -27,8 +23,7 @@ internal readonly struct BarColorTheme
 
 internal static class BarColorThemes
 {
-    // Classic VU, with a gentler curve than the original 1.85 so the green -> yellow -> orange handoff
-    // reads as a gradient rather than a visible seam.
+    // A gentler curve smooths the green-to-yellow-to-orange transition.
     public static readonly BarColorTheme ClassicSmooth = new(
         low: Color.FromArgb(0, 230, 90),
         mid: Color.FromArgb(255, 220, 0),
@@ -36,7 +31,7 @@ internal static class BarColorThemes
         peak: Color.Red,
         intensityCurve: 1.5f);
 
-    // Cool monitoring look: deep blue through cyan to near-white.
+    // Cool gradient from deep blue through cyan to near-white.
     public static readonly BarColorTheme Ice = new(
         low: Color.FromArgb(20, 70, 200),
         mid: Color.FromArgb(0, 200, 230),
@@ -44,7 +39,7 @@ internal static class BarColorThemes
         peak: Color.White,
         intensityCurve: 1.5f);
 
-    // Matches the title bar's warm amber/orange accent for brand consistency.
+    // Warm amber and orange tones echo the title-bar accent.
     public static readonly BarColorTheme Sunset = new(
         low: Color.FromArgb(140, 70, 10),
         mid: Color.FromArgb(230, 120, 20),
@@ -52,7 +47,7 @@ internal static class BarColorThemes
         peak: Color.FromArgb(255, 230, 160),
         intensityCurve: 1.5f);
 
-    // Minimal single-hue intensity ramp: dim to saturated to bright cyan.
+    // Cyan intensity ramp from dim to bright.
     public static readonly BarColorTheme MonoCyan = new(
         low: Color.FromArgb(10, 60, 70),
         mid: Color.FromArgb(0, 160, 190),
@@ -60,7 +55,7 @@ internal static class BarColorThemes
         peak: Color.FromArgb(220, 255, 255),
         intensityCurve: 1.4f);
 
-    // Retro 80s: purple through magenta to cyan, pairs well with Bricks mode.
+    // Retro gradient from purple through magenta to cyan.
     public static readonly BarColorTheme Synthwave = new(
         low: Color.FromArgb(60, 20, 120),
         mid: Color.FromArgb(200, 30, 160),
@@ -68,7 +63,7 @@ internal static class BarColorThemes
         peak: Color.FromArgb(120, 230, 255),
         intensityCurve: 1.5f);
 
-    // Northern-lights ramp: emerald through teal and cyan to a pale lavender peak.
+    // Aurora-inspired gradient from emerald through cyan to pale lavender.
     public static readonly BarColorTheme Aurora = new(
         low: Color.FromArgb(20, 110, 70),
         mid: Color.FromArgb(0, 190, 155),
@@ -83,6 +78,6 @@ internal static class BarColorThemes
         "monocyan" or "mono" or "monochromecyan" => MonoCyan,
         "synthwave" => Synthwave,
         "aurora" => Aurora,
-        _ => ClassicSmooth, // "classicsmooth", "classic", "", or unrecognized
+        _ => ClassicSmooth, // Use the classic palette for empty or unrecognized names.
     };
 }

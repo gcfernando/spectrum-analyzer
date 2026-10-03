@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Spectrum.Dsp;
 
-/// <summary>One display band: a contiguous frequency interval [LowerHz, UpperHz) with a geometric centre.</summary>
+/// <summary>A display band spanning [LowerHz, UpperHz) with a geometric centre.</summary>
 internal readonly struct FrequencyBand
 {
     public FrequencyBand(double lowerHz, double centerHz, double upperHz)
@@ -19,13 +19,7 @@ internal readonly struct FrequencyBand
     public double WidthHz => UpperHz - LowerHz;
 }
 
-/// <summary>
-/// Logarithmic (equal frequency-ratio) partition of the audio band into display bands.
-/// Band centres are spaced by a constant ratio r; edges lie at the geometric midpoints
-/// (centre / √r, centre · √r), so adjacent bands share an edge exactly: no gaps, no overlap.
-/// The plan never extends above Nyquist: if the requested top band would, the whole plan is
-/// regenerated with a lower top centre so the last upper edge equals Nyquist.
-/// </summary>
+/// <summary>Partitions the audio range into logarithmic bands with shared edges, capped at Nyquist.</summary>
 internal sealed class BandPlan
 {
     private readonly FrequencyBand[] _bands;
@@ -68,8 +62,7 @@ internal sealed class BandPlan
 
         if (lastCenterHz * Math.Sqrt(ratio) > nyquist)
         {
-            // Lower the top centre so the top edge lands exactly on Nyquist. With r = (top/first)^(1/(count−1)),
-            // top·√r = nyquist gives ln top = (2(count−1)·ln nyquist + ln first) / (2·count − 1).
+            // Lower the top centre so the final band edge lands exactly on Nyquist.
             var top = Math.Exp(((2.0 * (count - 1) * Math.Log(nyquist)) + Math.Log(firstCenterHz)) / ((2.0 * count) - 1));
             if (!(top > firstCenterHz))
             {
@@ -88,17 +81,13 @@ internal sealed class BandPlan
             var center = firstCenterHz * Math.Pow(ratio, i);
             var upper = i == count - 1 ? Math.Min(center * halfStep, nyquist) : center * halfStep;
             bands[i] = new FrequencyBand(lower, center, upper);
-            lower = upper; // shared edge: exact partition
+            lower = upper; // Reuse the edge so adjacent bands have no gaps or overlap.
         }
 
         return new BandPlan(bands, ratio, sampleRate);
     }
 
-    /// <summary>
-    /// Continuous position (in band-index units, 0 = left edge of band 0, Count = right edge of last band)
-    /// of an arbitrary frequency on this plan's logarithmic axis. Used by the UI so that frequency labels
-    /// and bars share one mapping model.
-    /// </summary>
+    /// <summary>Maps a frequency to continuous band-index position for consistent labels and bars.</summary>
     public double FrequencyToPosition(double hz)
     {
         if (!(hz > 0))

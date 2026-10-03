@@ -8,10 +8,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
-/// <summary>
-/// Dead-bar diagnostics: for every band, prints edges, FFT length, contributing bins, weights, and the
-/// response to a full-scale tone at the band centre, then asserts that every band has a valid measurement path.
-/// </summary>
+/// <summary>Dead-band diagnostics for each band and its centre-tone response.</summary>
 public class DiagnosticsReportTests
 {
     private readonly ITestOutputHelper _out;

@@ -7,7 +7,7 @@ A .NET Framework 4.8 Windows Forms application that captures your system's audio
 - **83-bar frequency spectrum** covering 20 Hz – 20 kHz on a logarithmic scale, with a labelled frequency axis (horizontal, bottom) and a labelled level axis (vertical, 0 to -72 dBFS, both sides)
 - **Reference gridlines** at -12/-24/-36/-48/-60 dBFS drawn inside each bar for at-a-glance level reading
 - **Measured band levels** — each bar is the integrated power of its frequency band in dBFS (see *Measurement*)
-- **9 visualization modes** selectable at runtime, with an initial value from `App.config`
+- **14 visualization modes** selectable at runtime, with an initial value from `App.config`
 - **6 colour themes** selectable at runtime, independent of mode, with an initial value from `App.config`
 - **Live mode and theme selectors** in the title bar; changes apply immediately without restarting
 - **Heat-map colour gradient** with peak markers tinted to match their theme's colour at that height
@@ -18,6 +18,8 @@ A .NET Framework 4.8 Windows Forms application that captures your system's audio
 - **Auto device recovery** — restores capture automatically when the default audio device changes
 - **Scaling layout** — bars and labels are laid out from the window's client size (the process does not declare per-monitor DPI awareness, so Windows scales it on high-DPI monitors)
 - **Keyboard shortcuts** — `Ctrl+M` cycles visualization modes; `Ctrl+T` cycles colour themes
+- **Fixed or Random rotation** — choose Fixed to keep selections stable, or Random to change mode and theme together at a configurable 1–240 minute interval (default 5 minutes); preferences are saved per user
+- **Rotation settings shortcut** — press `Ctrl+R` to open Fixed/Random and interval settings
 - **F12 toggle** — toggle always-on-top
 - **Single-instance** — uses a named mutex to prevent multiple instances
 
@@ -37,6 +39,11 @@ supported modes are:
 | `Center` | Energy from centre; orchestral / cinematic |
 | `Mirror` | Symmetrical balance; EDM / house music |
 | `Glow` | Soft level-driven halo with a bright core; a visual treatment only, not beat detection |
+| `Lollipop` | Thin frequency stems with a marker showing each current level |
+| `Waterfall` | Scrolling history of recent frequency levels |
+| `Radial Spectrum` | Frequency bands arranged around a circle |
+| `Contour` | Connected curve across frequency bands; interpolation is visual only |
+| `Note Map` | Approximate pitch-class view grouped from frequency bands |
 
 ## Colour Themes
 
@@ -57,6 +64,7 @@ control only the bar colour palette and are independent of, and composable with,
 `App.config` still supplies the initial mode and theme when the application starts:
 
 Runtime selections apply immediately for the current session and do not modify `App.config`.
+The selected mode and theme, Fixed/Random choice, and random interval are saved in the current Windows user's application settings; saved choices take precedence over `App.config` on later launches.
 
 ```xml
 <appSettings>

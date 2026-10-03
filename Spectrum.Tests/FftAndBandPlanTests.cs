@@ -3,7 +3,7 @@ using System.Linq;
 using Spectrum.Dsp;
 using Xunit;
 
-[assembly: CollectionBehavior(DisableTestParallelization = true)] // keeps timing/allocation measurements clean
+[assembly: CollectionBehavior(DisableTestParallelization = true)] // Keep timing/allocations stable.
 
 namespace Spectrum.Tests;
 
@@ -33,7 +33,7 @@ public class RadixTwoFftTests
                 si += (re[t] * Math.Sin(a)) + (im[t] * Math.Cos(a));
             }
 
-            // Relative to the transform magnitude (~sqrt(n) here): both computations accumulate O(n) rounding.
+            // Round-off accumulates in O(n) steps relative to ~sqrt(n) magnitude.
             Assert.InRange(fre[k] - sr, -1e-9 * n, 1e-9 * n);
             Assert.InRange(fim[k] - si, -1e-9 * n, 1e-9 * n);
         }
@@ -41,7 +41,7 @@ public class RadixTwoFftTests
 
     [Theory]
     [InlineData(32768)]
-    [InlineData(65536)] // largest production size (96 kHz: 32768-sample window zero-padded x2)
+    [InlineData(65536)] // 96 kHz production max; window is zero-padded x2
     public void SatisfiesParsevalAtProductionSizes(int n)
     {
         var rng = new Random(n);
@@ -63,7 +63,7 @@ public class RadixTwoFftTests
     [Fact]
     public void BinFrequencyMapping_IsKTimesFsOverN()
     {
-        // A complex exponential at exactly bin k puts all energy in bin k: frequency = k · fs / N.
+        // A pure bin tone stays in its bin: f = k·fs/N.
         const int n = 4096;
         const int k = 341;
         var re = new double[n];
@@ -124,7 +124,7 @@ public class BandPlanTests
         }
         else
         {
-            // Too few bands for 20 kHz to fit below Nyquist with its upper half-band: plan regenerated to end at Nyquist.
+            // Too few bands to keep 20 kHz below Nyquist; plan ends at Nyquist.
             Assert.InRange(plan.MaxHz / (fs / 2.0), 1 - 1e-9, 1.0);
         }
     }
@@ -167,8 +167,7 @@ public class BandPlanTests
         {
             var d = engine.GetDiagnostic(b);
 
-            // Each weight is the fraction of a bin's interval inside the band, so Σw·Δf must equal the band width:
-            // nothing inside the band is missed and nothing outside it is counted.
+            // Bin weights cover the band exactly once.
             Assert.Equal(d.UpperHz - d.LowerHz, d.Weights.Sum() * d.BinWidthHz, 6);
             Assert.All(d.Weights, w => Assert.InRange(w, 0.0, 1.0));
             Assert.True(d.FirstBin >= 1, "DC bin must never contribute");
@@ -201,12 +200,12 @@ public class BandPlanTests
                 Assert.True(Signals.IsResolved(d), $"band {b}: {d.WidthHz() / d.ResolutionHz:F2} bins at N={d.WindowLength}");
             }
 
-            // Zero padding only where a band would otherwise hold less than one bin.
+            // Zero-padding only when a band would otherwise have <1 bin.
             Assert.True(d.BinWidthHz <= d.WidthHz() || d.FftLength == d.WindowLength * BandSpectrumAnalyzer.MaxZeroPadding, $"band {b}");
 
             if (b > 0)
             {
-                // Resolution only ever gets coarser (shorter window) going up in frequency.
+                // Resolution only gets coarser at higher frequencies.
                 Assert.True(d.WindowLength <= engine.GetWindowLength(b - 1));
             }
         }

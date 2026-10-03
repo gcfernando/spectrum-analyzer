@@ -6,10 +6,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
-/// <summary>
-/// Instrument-like synthetic material (the repository contains no recorded audio). These check that musically
-/// meaningful structure emerges from the measurement itself: harmonics, pitch movement, kick and hi-hat placement.
-/// </summary>
+/// <summary>Synthetic musical material checks harmonics, pitch motion, and rhythm in measurement output.</summary>
 public class MusicalSignalTests
 {
     private const int Fs = 48000;
@@ -24,7 +21,7 @@ public class MusicalSignalTests
     [Fact]
     public void HarmonicTone_ShowsFundamentalAndResolvableOvertonesAsSeparatePeaks()
     {
-        // 220 Hz (A3) with 1/k harmonic amplitudes, like a bright string/brass tone at −12 dBFS.
+        // A3 220 Hz with 1/k harmonics; bright string/brass tone at −12 dBFS.
         var engine = Signals.DefaultEngine(Fs);
         const double f0 = 220;
         var buf = Signals.Interleaved(engine.RequiredFrames, 2, (_, n) =>
@@ -38,13 +35,13 @@ public class MusicalSignalTests
             peaks[k] = Math.Max(db[bar], Math.Max(db[bar - 1], db[bar + 1]));
             _out.WriteLine($"harmonic {k} ({f0 * k} Hz) -> bar {bar}: {db[bar]:F1} dB (neighbours {db[bar - 1]:F1} / {db[bar + 1]:F1})");
 
-            // Level of a 0.25/k partial is 20·log10(0.25/k); allow for sharing with a neighbour bar near an edge.
+            // A 0.25/k partial is 20·log10(0.25/k); allow for edge-sharing.
             Assert.InRange(peaks[k], (20 * Math.Log10(0.25 / k)) - 3.2, (20 * Math.Log10(0.25 / k)) + 0.1);
         }
 
         for (var k = 1; k <= 5; k++)
         {
-            // Consecutive harmonics are separate peaks: the display dips clearly between them.
+            // Consecutive harmonics should stay as separate peaks.
             var from = BarOf(engine.Plan, f0 * k) + 1;
             var to = BarOf(engine.Plan, f0 * (k + 1)) - 1;
             var dip = Enumerable.Range(from, to - from + 1).Min(i => db[i]);
@@ -55,7 +52,7 @@ public class MusicalSignalTests
     [Fact]
     public void BassLine_PitchMovementMovesTheFundamentalBar()
     {
-        // Chromatic bass walk E1 (41.2 Hz) → E2 (82.4 Hz), each note with 3 harmonics.
+        // Chromatic bass walk E1→E2, three harmonics per note.
         var engine = Signals.DefaultEngine(Fs);
         var previous = -1;
         var bars = new int[13];
@@ -66,7 +63,7 @@ public class MusicalSignalTests
                 Signals.Sine(f, 0.5, n, Fs) + Signals.Sine(2 * f, 0.25, n, Fs) + Signals.Sine(3 * f, 0.12, n, Fs));
             var db = Signals.AnalyzeDb(engine, buf);
 
-            // Strongest bar at or below 1.5 f: the fundamental's bar.
+            // Strongest bar at or below 1.5f is the fundamental.
             var limit = BarOf(engine.Plan, 1.5 * f);
             var bar = Enumerable.Range(0, limit).OrderByDescending(i => db[i]).First();
             bars[semitone] = bar;
@@ -85,7 +82,7 @@ public class MusicalSignalTests
     [Fact]
     public void KickDrum_EnergyLandsInTheBassBarsNotTheHighs()
     {
-        // Kick: sine sweeping 120→45 Hz with a 90 ms decay, every 500 ms, peak −3 dBFS.
+        // Kick: 120→45 Hz sweep, 90 ms decay, every 500 ms.
         var engine = Signals.DefaultEngine(Fs);
         double Kick(long n)
         {
@@ -113,7 +110,7 @@ public class MusicalSignalTests
     [Fact]
     public void HiHat_EnergyLandsInTheHighBarsNotTheBass()
     {
-        // Hi-hat: second-difference high-passed noise bursts with 40 ms decay, 8 per second.
+        // Hi-hat: 40 ms high-passed noise bursts at 8/s.
         var engine = Signals.DefaultEngine(Fs);
         var white = Signals.WhiteNoise(Fs * 2, 0.3, 5);
         double Hat(long n)

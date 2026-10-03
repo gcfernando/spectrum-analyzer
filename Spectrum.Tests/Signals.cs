@@ -8,7 +8,7 @@ internal static class Signals
 {
     public const int Fs48k = 48000;
 
-    /// <summary>Interleaved buffer of <paramref name="frames"/> frames; <paramref name="gen"/>(channel, sampleIndex).</summary>
+    /// <summary>Interleaved buffer of <paramref name="frames"/> frames.</summary>
     public static float[] Interleaved(int frames, int channels, Func<int, long, double> gen)
     {
         var buffer = new float[frames * channels];
@@ -32,7 +32,7 @@ internal static class Signals
     public static float[] MonoSine(int frames, int fs, double hz, double amp)
         => Interleaved(frames, 1, (_, n) => Sine(hz, amp, n, fs));
 
-    /// <summary>Gaussian white noise with standard deviation <paramref name="sigma"/> (same seed → same samples).</summary>
+    /// <summary>Gaussian white noise with standard deviation <paramref name="sigma"/>.</summary>
     public static double[] WhiteNoise(int length, double sigma, int seed)
     {
         var rng = new Random(seed);
@@ -53,9 +53,7 @@ internal static class Signals
         return x;
     }
 
-    /// <summary>
-    /// Pink noise via Paul Kellet's refined filter (documented accuracy ±0.05 dB above 9.2 Hz at 44.1 kHz).
-    /// </summary>
+    /// <summary>Pink noise via Paul Kellet's refined filter.</summary>
     public static double[] PinkNoise(int length, int seed)
     {
         var white = WhiteNoise(length, 1.0, seed);
@@ -80,7 +78,7 @@ internal static class Signals
     public static float[] ToInterleaved(double[] mono, int start, int frames, int channels)
         => Interleaved(frames, channels, (_, n) => mono[start + n]);
 
-    /// <summary>Analyse a buffer that holds exactly <see cref="BandSpectrumAnalyzer.RequiredFrames"/> frames; returns band levels in dB.</summary>
+    /// <summary>Analyzes a RequiredFrames buffer and returns band levels in dB.</summary>
     public static double[] AnalyzeDb(BandSpectrumAnalyzer engine, float[] interleaved)
     {
         var power = new double[engine.Plan.Count];
@@ -126,15 +124,12 @@ internal static class Signals
         return LevelScale.PowerToDb(sum);
     }
 
-    /// <summary>Resolution-limited band: the analysis window cannot place <see cref="BandSpectrumAnalyzer.MinBinsPerBand"/> bins in it.</summary>
+    /// <summary>Resolution-limited band: window too short for MinBinsPerBand bins.</summary>
     public static bool IsResolved(BandDiagnostic d) => d.WidthHz() / d.ResolutionHz >= BandSpectrumAnalyzer.MinBinsPerBand;
 
     public static double WidthHz(this BandDiagnostic d) => d.UpperHz - d.LowerHz;
 
-    /// <summary>
-    /// Approximate independent estimates per frame for a noise-like input: resolution bins in the band divided by
-    /// the Hann equivalent noise bandwidth (1.5 bins), at least one.
-    /// </summary>
+    /// <summary>Approximate independent noise estimates per frame.</summary>
     public static double DegreesOfFreedom(BandDiagnostic d) => Math.Max(1.0, d.WidthHz() / d.ResolutionHz / 1.5);
 
     public static BandSpectrumAnalyzer DefaultEngine(int fs = Fs48k, int channels = 2)

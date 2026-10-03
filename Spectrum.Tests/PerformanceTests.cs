@@ -6,10 +6,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
-/// <summary>
-/// Per-frame cost and allocation of the analysis path. Timing is reported, not asserted tightly
-/// (machine dependent); allocation-freedom of the steady-state hot path is asserted.
-/// </summary>
+/// <summary>Analysis cost and allocation; the hot path must stay allocation-free.</summary>
 public class PerformanceTests
 {
     private readonly ITestOutputHelper _out;
@@ -64,7 +61,7 @@ public class PerformanceTests
         _out.WriteLine($"stereo 83-band frame (windows 4096+8192+16384, longest zero-padded to 32768): {msPerFrame:F3} ms/frame = {msPerFrame / 31.7 * 100:F1} % of one core at the measured 31.7 ms hop");
         _out.WriteLine($"allocated {allocated} bytes over {frames} frames (AppDomain-wide, includes test-runner noise); gen0 collections {GC.CollectionCount(0) - gen0}");
 
-        // AppDomain-wide counter: allow a little background noise from the test host, far below one array allocation per frame.
+        // Allow small host noise; it stays far below one array allocation per frame.
         Assert.True(allocated / (double)frames < 64, $"{allocated / (double)frames:F1} bytes/frame allocated");
         Assert.True(msPerFrame < 12.5, "analysis must use well under the analysis hop");
     }

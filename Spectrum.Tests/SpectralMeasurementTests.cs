@@ -6,14 +6,14 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
-/// <summary>Synthetic-signal validation of the measurement: tones, amplitude, boundaries, sweeps, multi-tone, noise.</summary>
+/// <summary>Validation of tones, amplitude, boundaries, sweeps, multi-tone, and noise.</summary>
 public class SpectralMeasurementTests
 {
     private readonly ITestOutputHelper _out;
 
     public SpectralMeasurementTests(ITestOutputHelper output) => _out = output;
 
-    // ---------- Single tones / dead bars ----------
+    // Single tones and dead bars.
 
     [Theory]
     [InlineData(83, 44100)]
@@ -29,17 +29,17 @@ public class SpectralMeasurementTests
         {
             var db = Signals.AnalyzeDb(engine, Signals.StereoSine(engine.RequiredFrames, fs, engine.Plan[b].CenterHz, 1, 1));
 
-            // The bar for the tone's frequency is the strongest bar: no dead or misplaced bars.
+            // The tone's bar should be the strongest bar.
             Assert.Equal(b, Signals.ArgMax(db));
 
             if (Signals.IsResolved(engine.GetDiagnostic(b)))
             {
-                // Physically resolvable band (window main lobe fits inside): the whole tone is captured.
+                // Resolved band: the whole tone is captured.
                 Assert.InRange(db[b], -0.05, 0.05);
             }
             else
             {
-                // Band narrower than the main lobe: the tone is shared with neighbours (documented limitation).
+                // Narrow band: the tone spills into neighbours.
                 Assert.InRange(db[b], -8.0, 0.05);
             }
 
@@ -69,7 +69,7 @@ public class SpectralMeasurementTests
                 var db = Signals.AnalyzeDb(engine, Signals.StereoSine(engine.RequiredFrames, 48000, hz, amp, amp));
                 var expected = 20 * Math.Log10(amp);
 
-                // Integrated band power is scallop-free: on-bin and half-bin tones read the same.
+                // Integrated band power is scallop-free.
                 Assert.InRange(db[band] - expected, -0.05, 0.05);
             }
         }
@@ -79,7 +79,7 @@ public class SpectralMeasurementTests
     public void ToneOnBandBoundary_SplitsEnergyBetweenTheTwoBandsWithoutLoss()
     {
         var engine = Signals.DefaultEngine();
-        const int b = 55; // ~2 kHz, resolved region
+        const int b = 55; // ~2 kHz resolved region
         var edge = engine.Plan[b].UpperHz;
 
         var onEdge = Signals.AnalyzePower(engine, Signals.StereoSine(engine.RequiredFrames, 48000, edge, 1, 1));
@@ -92,7 +92,7 @@ public class SpectralMeasurementTests
         Assert.Equal(b, Signals.ArgMax(below));
         Assert.Equal(b + 1, Signals.ArgMax(above));
 
-        // No unexplained distant activity: bands further than one away stay far below the tone.
+        // Distant bars stay far below the tone.
         for (var i = 0; i < engine.Plan.Count; i++)
         {
             if (Math.Abs(i - b) > 2)
@@ -116,13 +116,13 @@ public class SpectralMeasurementTests
     [Fact]
     public void ContentAboveTheTopBand_CreatesNoFakeActivity()
     {
-        // 21.8 kHz at 44.1 kHz: above the plan (top edge 20.86 kHz) but below Nyquist.
+        // 21.8 kHz is above the plan but below Nyquist.
         var engine = Signals.DefaultEngine(44100);
         var db = Signals.AnalyzeDb(engine, Signals.StereoSine(engine.RequiredFrames, 44100, 21800, 1, 1));
         Assert.All(db, v => Assert.True(v < LevelScale.FloorDb, $"{v:F1} dB"));
     }
 
-    // ---------- Sweeps ----------
+    // Sweeps.
 
     [Theory]
     [InlineData(44100)]
@@ -145,24 +145,20 @@ public class SpectralMeasurementTests
             Assert.True(argmax - previous <= 1, $"{hz:F1} Hz: bar skipped from {previous} to {argmax}");
             previous = argmax;
 
-            // The strongest bar contains the tone, or (below the resolution limit) is within half a resolution
-            // bin of it: the lobe peak is located to the interpolated-bin grid.
+            // The strongest bar contains the tone or sits within half a resolution bin.
             var band = engine.Plan[argmax];
             var d = engine.GetDiagnostic(argmax);
             var offset = hz < band.LowerHz ? band.LowerHz - hz : (hz > band.UpperHz ? hz - band.UpperHz : 0.0);
             worstOffset = Math.Max(worstOffset, offset / d.ResolutionHz);
             Assert.True(offset <= 0.5 * d.ResolutionHz, $"{hz:F2} Hz shown in bar {argmax} [{band.LowerHz:F2}, {band.UpperHz:F2}]");
 
-            // Energy conservation across the whole partition: the tone's power is found somewhere, never lost.
-            // Checked where the main lobe (±2 resolution bins) lies inside the plan; energy below the first
-            // band's lower edge (19.2 Hz) is intentionally not displayed.
+            // Power is conserved across the partition; lower bands are intentionally omitted.
             if (hz - (2 * engine.GetDiagnostic(0).ResolutionHz) >= engine.Plan.MinHz)
             {
                 var total = Signals.SumDb(p, 0, p.Length - 1);
                 if (NearResolutionTransition(engine, hz))
                 {
-                    // Documented multi-resolution limit: within two coarse bins of a window-length switch the coarser
-                    // window's wider lobe crosses the edge into a band measured with the finer window, so the total is off by up to ~0.5 dB.
+                    // Near a window switch, the wider coarse lobe can bias the total by ~0.5 dB.
                     maxTransition = Math.Max(maxTransition, Math.Abs(total));
                     Assert.True(Math.Abs(total) <= 0.6, $"{hz:F2} Hz (transition): total band power {total:F3} dB");
                 }
@@ -201,7 +197,7 @@ public class SpectralMeasurementTests
     {
         const int fs = 48000;
         const double f0 = 20, f1 = 20000, duration = 12.0;
-        const int hop = 1520; // 31.7 ms: measured analysis cadence of the application
+        const int hop = 1520; // 31.7 ms measured analysis cadence.
         var engine = Signals.DefaultEngine(fs);
         var k = Math.Log(f1 / f0);
 
@@ -222,7 +218,7 @@ public class SpectralMeasurementTests
             var p = Signals.AnalyzePower(engine, buf);
             if (end < engine.RequiredFrames)
             {
-                continue; // window not yet full of chirp
+                continue; // Window not yet full of chirp.
             }
 
             var argmax = Signals.ArgMax(p);
@@ -236,7 +232,7 @@ public class SpectralMeasurementTests
             previous = argmax;
         }
 
-        // Every bar above the first window-length of the sweep is visited (no dead zones).
+        // Every bar above the first sweep window is visited.
         var firstReachable = visited.ToList().IndexOf(true);
         for (var b = firstReachable; b < engine.Plan.Count; b++)
         {
@@ -246,7 +242,7 @@ public class SpectralMeasurementTests
         _out.WriteLine($"chirp visited bars {firstReachable}..{engine.Plan.Count - 1} contiguously");
     }
 
-    // ---------- Multi-tone ----------
+    // Multi-tone.
 
     [Fact]
     public void MultipleTones_AreMeasuredIndependently()
@@ -263,13 +259,13 @@ public class SpectralMeasurementTests
             var single = Signals.AnalyzeDb(engine, Signals.StereoSine(n, 48000, hz, Math.Pow(10, db / 20), Math.Pow(10, db / 20)));
             var band = Signals.ArgMax(single);
 
-            // A quiet tone is not suppressed by a loud one and no global normalization alters relative levels.
+            // A quiet tone is not suppressed by a louder one.
             Assert.InRange(mixDb[band] - single[band], -0.1, 0.1);
             _out.WriteLine($"{hz,7} Hz @ {db,5} dBFS -> bar {band,2}: single {single[band],7:F2} dB, in mix {mixDb[band],7:F2} dB");
         }
     }
 
-    // ---------- Noise ----------
+    // Noise.
 
     [Fact]
     public void WhiteNoise_BandPowerMatchesTheIntegratedFlatDensity()
@@ -291,7 +287,7 @@ public class SpectralMeasurementTests
             }
         }
 
-        // Expected: σ² spread uniformly over 0..fs/2, integrated over the band width, relative to 0.5.
+        // σ² is spread uniformly over 0..fs/2 and integrated over the band width.
         var worst = 0.0;
         for (var b = 0; b < mean.Length; b++)
         {
@@ -299,12 +295,12 @@ public class SpectralMeasurementTests
             var err = LevelScale.PowerToDb(mean[b]) - LevelScale.PowerToDb(expected);
             worst = Math.Max(worst, Math.Abs(err));
 
-            // 4σ of the averaged power estimate (σ ≈ 4.34 dB / sqrt(dof · frames)) plus 0.1 dB model allowance.
+            // 4σ plus 0.1 dB model allowance.
             var tolerance = (4 * 4.34 / Math.Sqrt(Signals.DegreesOfFreedom(engine.GetDiagnostic(b)) * frames)) + 0.1;
             Assert.True(Math.Abs(err) < tolerance, $"band {b}: {err:F2} dB (tolerance {tolerance:F2})");
         }
 
-        // Integrated white noise rises 10·log10(2) ≈ 3.01 dB per octave across constant-ratio bands.
+        // Integrated white noise rises ~3.01 dB per octave.
         var perOctave = (LevelScale.PowerToDb(mean[80]) - LevelScale.PowerToDb(mean[40])) / Math.Log(engine.Plan[80].CenterHz / engine.Plan[40].CenterHz, 2);
         Assert.InRange(perOctave, 2.8, 3.2);
         _out.WriteLine($"white noise: worst band error {worst:F2} dB, slope {perOctave:F2} dB/octave");
@@ -313,7 +309,7 @@ public class SpectralMeasurementTests
     [Fact]
     public void PinkNoise_ReadsFlatAcrossConstantRatioBands()
     {
-        const int fs = 44100; // the filter's documented accuracy is specified at 44.1 kHz
+        const int fs = 44100; // Filter accuracy is specified at 44.1 kHz.
         var engine = Signals.DefaultEngine(fs, 1);
         var n = engine.RequiredFrames;
         const int frames = 200;
@@ -322,7 +318,7 @@ public class SpectralMeasurementTests
         var mean = new double[engine.Plan.Count];
         for (var f = 0; f < frames; f++)
         {
-            var p = Signals.AnalyzePower(engine, Signals.ToInterleaved(noise, fs + (f * n), n, 1)); // skip filter warm-up
+            var p = Signals.AnalyzePower(engine, Signals.ToInterleaved(noise, fs + (f * n), n, 1)); // Skip filter warm-up.
             for (var b = 0; b < mean.Length; b++)
             {
                 mean[b] += p[b] / frames;
@@ -334,7 +330,7 @@ public class SpectralMeasurementTests
         var worst = 0.0;
         for (var b = 0; b < db.Length; b++)
         {
-            // 4σ statistical allowance (see white-noise test) plus the filter's documented ±0.05 dB and 0.1 dB model allowance.
+            // 4σ plus the filter tolerance and 0.1 dB model allowance.
             var tolerance = (4 * 4.34 / Math.Sqrt(Signals.DegreesOfFreedom(engine.GetDiagnostic(b)) * frames)) + 0.15;
             worst = Math.Max(worst, Math.Abs(db[b] - reference));
             Assert.True(Math.Abs(db[b] - reference) < tolerance, $"band {b} ({engine.Plan[b].CenterHz:F0} Hz): {db[b] - reference:F2} dB");

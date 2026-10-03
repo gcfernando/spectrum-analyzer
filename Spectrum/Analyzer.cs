@@ -25,39 +25,33 @@ public sealed class Analyzer : IDisposable
 
     private const int LINES = 83;
 
-    // Band plan: 83 log-spaced bands whose centres run from 20 Hz to 20 kHz (about 1/8.3 octave each).
+    // The 83 logarithmic band centres span 20 Hz to 20 kHz.
     private const double FIRST_CENTER_HZ = 20.0;
     private const double LAST_CENTER_HZ = 20000.0;
 
-    // Analysis hop: one STFT frame per tick. With the default 15.6 ms Windows timer resolution the 25 ms
-    // one-shot timer actually fires every ~31.7 ms (measured), i.e. ~31.6 frames/s. The hop must stay <= half
-    // the shortest window (4096 samples = 85 ms at 48 kHz) so the Hann-windowed frames cover every sample.
+    // Each timer tick analyzes one STFT frame; its hop stays within half the shortest window to cover every sample.
     private const int TIMER_INTERVAL_MS = 25;
     private const int HANG_THRESHOLD = 8;
     private const int SILENCE_FRAMES_REQUIRED = 4;
 
-    // WASAPI capture buffer and callback period. A 10 ms period gives ~100 callbacks per second
-    // (measured on loopback); the previous 50 ms period gave ~20 per second, so every other 25 ms analysis
-    // tick re-analysed stale audio and transients were quantized to 50 ms.
+    // The 10 ms WASAPI period supplies fresh audio between 25 ms analysis ticks and preserves transient timing.
     private const float WASAPI_BUFFER_SECONDS = 1f;
     private const float WASAPI_PERIOD_SECONDS = 0.01f;
 
-    // Sample history kept for analysis, as a multiple of the longest FFT (headroom for the lock-free snapshot).
+    // History capacity is a multiple of the longest FFT to allow lock-free snapshots.
     private const int HISTORY_CAPACITY_FACTOR = 4;
 
     private readonly Timer _timer;
     private readonly byte[] _spectrumData;
     private readonly double[] _bandPower;
 
-    // Current capture stream (analysis state + the history frame count when it started), replaced as a whole
-    // through this single volatile reference each time capture is (re)started.
+    // Replaced atomically whenever capture restarts; records analysis state and its starting frame count.
     private volatile CaptureStream _stream;
 
-    // Timer-thread only: silence / stall / gap decisions per tick.
+    // Timer-thread state for silence, stall, and gap decisions.
     private readonly CaptureGate _gate = new(SILENCE_FRAMES_REQUIRED, HANG_THRESHOLD);
 
-    // 1 while a tick is running. Device recovery restarts the timer from the UI thread, which could otherwise
-    // start a second tick while one is still publishing through the shared buffers.
+    // Prevents device recovery from starting a second tick while shared buffers are in use.
     private int _tickActive;
 
     private readonly byte[] _fireData;
@@ -74,9 +68,9 @@ public sealed class Analyzer : IDisposable
 
     private bool _initialized;
     private volatile bool _disposed;
-    private volatile bool _recovering; // set while device recovery is pending on UI thread
+    private volatile bool _recovering; // True while device recovery is pending on the UI thread.
 
-    private int _sampleRate = 48000; // updated from WASAPI info after init
+    private int _sampleRate = 48000; // Updated from WASAPI after initialization.
 
     public int SelectIndex { get; set; }
 
@@ -166,7 +160,7 @@ public sealed class Analyzer : IDisposable
             }
         }
 
-        // Prefer the Windows default render endpoint so we always capture from the active output.
+        // Prefer the Windows default render endpoint.
         Device device = null;
         try
         {
@@ -182,7 +176,7 @@ public sealed class Analyzer : IDisposable
         }
         catch { }
 
-        // Fall back to name-based heuristics if default endpoint lookup failed.
+        // Fall back to matching common output device names.
         device ??=
             devices.FirstOrDefault(d => d.DeviceName.IndexOf("Headphones", StringComparison.OrdinalIgnoreCase) >= 0)
             ?? devices.FirstOrDefault(d => d.DeviceName.IndexOf("Headset", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -246,9 +240,7 @@ public sealed class Analyzer : IDisposable
                     _sampleRate = 48000;
                 }
 
-                // New history only when the device format changed; the capture callback and the analysis thread
-                // both pick it up through the single volatile reference. Reusing the state avoids ~2.5 MB of
-                // reallocation per device recovery.
+                // Reuse history unless the device format changed, avoiding large allocations during recovery.
                 var state = _stream?.State;
                 if (state == null || state.SampleRate != _sampleRate || state.History.Channels != channels)
                 {
@@ -272,8 +264,7 @@ public sealed class Analyzer : IDisposable
         }
     }
 
-    // WASAPI capture callback (BASSWASAPI thread): copy the float frames into the lock-free history only.
-    // No allocation, locking, logging or analysis happens here.
+    // Copy captured frames into history; keep this callback allocation-free and free of analysis or locks.
     private int Process(IntPtr buffer, int length, IntPtr user)
     {
         _stream?.State.History.Write(buffer, length);
@@ -293,10 +284,7 @@ public sealed class Analyzer : IDisposable
         _ = Bass.BASS_Free();
     }
 
-    // Bounds the gap between the timer thread (inside BASS_WASAPI_GetLevel/analysis) and teardown on the UI
-    // thread or the IMMNotificationClient callback thread. The tick body is a few BASS calls plus an in-memory
-    // analysis step (no I/O), so a short bounded spin is enough; it avoids calling BASS_WASAPI_Free/BASS_Free
-    // while a tick is still using the handle being freed.
+    // Wait briefly for analysis to finish before freeing BASS handles used by the timer thread.
     private void WaitForTickToFinish()
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -315,7 +303,7 @@ public sealed class Analyzer : IDisposable
 
         if (Interlocked.CompareExchange(ref _tickActive, 1, 0) != 0)
         {
-            return; // a tick is still running (only possible around device recovery); its finally restarts the timer
+            return; // The active tick restarts the timer in its finally block.
         }
 
         try
@@ -353,7 +341,7 @@ public sealed class Analyzer : IDisposable
         }
     }
 
-    // Silence: publish the floor and let the presentation release ballistics (time-based) decay the bars.
+    // Publish the floor and let presentation ballistics decay the bars.
     private void PublishSilence()
     {
         Array.Clear(_spectrumData, 0, LINES);
@@ -365,7 +353,7 @@ public sealed class Analyzer : IDisposable
         var frames = state.Engine.RequiredFrames;
         if (!state.History.TryCopyLatest(state.Snapshot, frames, out _, _gate.GapEndFrame))
         {
-            return; // producer lapped the reader: keep the previous complete frame rather than publish a torn one
+            return; // Keep the previous complete frame if the producer overwrote this snapshot.
         }
 
         state.Engine.Analyze(state.Snapshot, frames, _bandPower);
@@ -386,9 +374,7 @@ public sealed class Analyzer : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    // Hang detection lives in CaptureGate: capture stalled while the level stays frozen at a non-zero value.
-    // (The original rule, "same non-zero level for 9 ticks", fired on every steady signal and reset the device
-    // every ~0.3 s during test tones and sustained notes.)
+    // CaptureGate requires stalled frames and a frozen non-zero level to detect a device hang.
     private void RecoverHungDevice()
     {
         _recovering = true;
@@ -409,13 +395,7 @@ public sealed class Analyzer : IDisposable
         }
         else
         {
-            // No SynchronizationContext to post to: this fallback runs inline on the calling thread, which is
-            // the timer thread itself (TimerTick still holds _tickActive while it runs). Free BASS directly
-            // (bypassing Free()) instead of clearing _tickActive early: clearing it here would make the
-            // in-progress teardown/reinit invisible to a concurrent Dispose() on another thread, letting its
-            // WaitForTickToFinish fall through and call BASS_WASAPI_Free/BASS_Free while this thread is still
-            // using/recreating the same handles. Keeping _tickActive==1 for the whole call (TimerTick's finally
-            // clears it once this method returns) makes a concurrent Dispose() correctly wait instead.
+            // Run recovery inline and keep _tickActive set so concurrent disposal waits for teardown to finish.
             _ = BassWasapi.BASS_WASAPI_Free();
             _ = Bass.BASS_Free();
             _ = Bass.BASS_Init(0, 48000, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero);
@@ -451,7 +431,7 @@ public sealed class Analyzer : IDisposable
         _timer.Elapsed -= TimerTick;
         _timer.Dispose();
 
-        // Call BASS cleanup directly — Free() checks _disposed and would return early here
+        // Free() returns when disposed, so clean up BASS directly.
         WaitForTickToFinish();
         _ = BassWasapi.BASS_WASAPI_Free();
         _ = Bass.BASS_Free();
@@ -484,7 +464,7 @@ public sealed class Analyzer : IDisposable
         public SampleHistory History { get; }
         public int SampleRate => Engine.Plan.SampleRate;
 
-        // Owned by the analysis (timer) thread.
+        // Used only by the analysis thread.
         public float[] Snapshot { get; }
 
         public static AnalysisState Create(int sampleRate, int channels)

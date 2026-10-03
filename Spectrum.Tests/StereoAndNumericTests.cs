@@ -5,16 +5,13 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
-/// <summary>
-/// Declared stereo semantics: band power = mean of the L and R channel powers.
-/// L = R reads like mono; one channel alone reads −3.01 dB; phase between channels never matters.
-/// </summary>
+/// <summary>Stereo means mean L/R power; one channel reads −3.01 dB and phase is irrelevant.</summary>
 public class StereoTests
 {
     private const int Fs = 48000;
     private static readonly BandPlan Plan = Signals.DefaultEngine(Fs).Plan;
 
-    // Band-centre tones (bars 50 and 66), so the tone lies well inside its band.
+    // Band-centre tones keep the tone well inside its band.
     private static readonly double Hz = Plan[50].CenterHz;
     private static readonly double Hz2 = Plan[66].CenterHz;
     private static readonly double OneChannelDb = 10 * Math.Log10(0.5);
@@ -53,7 +50,7 @@ public class StereoTests
     [Fact]
     public void AntiPhase_DoesNotCancel()
     {
-        // The original (L+R)/2 mono FFT measured −∞ dB here (verified against BASS); total energy must not vanish.
+        // The mono result is −∞ dB here; the total energy must not vanish.
         Assert.InRange(BandDb(Stereo(n => S(Hz, 1, n), n => -S(Hz, 1, n))), -0.05, 0.05);
     }
 
@@ -83,7 +80,7 @@ public class StereoTests
     [Fact]
     public void MultichannelDevice_AnalysesTheFrontPair()
     {
-        // Documented behaviour: channels beyond front L/R (centre, LFE, surrounds) are not part of the measurement.
+        // Only front L/R channels are measured.
         var engine = Signals.DefaultEngine(Fs, 6);
         Assert.Equal(2, engine.AnalysedChannels);
         var front = Signals.Interleaved(engine.RequiredFrames, 6, (c, n) => c < 2 ? S(Hz, 1, n) : 0);
@@ -106,8 +103,8 @@ public class NumericalSafetyTests
 
     [Theory]
     [InlineData(1e-6)]   // −120 dBFS
-    [InlineData(1e-20)]  // far below float resolution of normal music
-    [InlineData(1e-40)]  // subnormal float
+    [InlineData(1e-20)]  // Well below normal float precision
+    [InlineData(1e-40)]  // Subnormal float
     public void ExtremelyLowLevels_StayFiniteAndBelowTheFloor(double amp)
     {
         var engine = Signals.DefaultEngine();
@@ -143,7 +140,7 @@ public class NumericalSafetyTests
     {
         var engine = Signals.DefaultEngine();
         var db = Signals.AnalyzeDb(engine, Signals.StereoSine(engine.RequiredFrames, 48000, engine.Plan[50].CenterHz, 1e6, 1e6));
-        Assert.InRange(db.Max(), 119.9, 120.1); // measurement reports +120 dBFS honestly
+        Assert.InRange(db.Max(), 119.9, 120.1); // Reports +120 dBFS honestly.
         Assert.Equal(255, LevelScale.ToDisplayByte(db.Max()));
     }
 

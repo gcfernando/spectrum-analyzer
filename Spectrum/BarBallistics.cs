@@ -3,19 +3,12 @@ using System.Collections.Generic;
 
 namespace Spectrum;
 
-/// <summary>
-/// Presentation ballistics for one bar, driven only by elapsed time so behaviour is independent of the
-/// UI refresh rate. Values are in display units (0..fullScale, linear in dB of the measured band level).
-/// <list type="bullet">
-/// <item>Attack: slew-rate limited rise; a full-scale rise takes <c>attackMs</c>.</item>
-/// <item>Release: exponential approach to the target with time constant <c>releaseMs</c>
-///   (coefficient 1 − e^(−Δt/τ), exact for any Δt).</item>
-/// <item>Peak marker: independent state — captures the bar level, holds for <c>holdMs</c>, then falls linearly.</item>
-/// </list>
-/// </summary>
+/// Presentation ballistics for one bar. Timing is based on elapsed time so refresh rate does not change the result.
+/// Values use display units from 0..fullScale and track the measured band level in dB.
+/// Attack, release, and peak hold are handled independently.
 internal static class BarBallistics
 {
-    /// <summary>Residual distance below which the release is considered settled.</summary>
+    /// Residual distance below which the release is considered settled.
     public const float SettleEpsilon = 0.05f;
 
     public static float StepLevel(float current, float target, float dtSeconds, float fullScale, int attackMs, int releaseMs, bool snapDown)
@@ -43,14 +36,9 @@ internal static class BarBallistics
         return current;
     }
 
-    /// <summary>
-    /// Number of lit bricks (a bottom-up prefix) for a level whose top is at pixel row <paramref name="topLimit"/>.
-    /// A brick lights when the level covers its centre; with <paramref name="hysteresisPx"/> &gt; 0 the next brick turns
-    /// on only when the level is that far above its centre, and the top lit brick turns off only when the level is
-    /// more than that far below its centre, so a level hovering at a boundary does not flicker. Idempotent: applying it
-    /// again for the same level returns the same count.
-    /// </summary>
-    /// <param name="centresBottomUp">Pixel row of each brick centre, bottom brick first (rows decrease upward).</param>
+    /// Returns the number of lit bricks for a level whose top is at the given pixel row.
+    /// A brick turns on when the level reaches its centre and turns off only after hysteresis is crossed.
+    /// <param name="centresBottomUp">Brick centres from the bottom up; rows decrease upward.</param>
     public static int StepLitBricks(int currentLit, IReadOnlyList<int> centresBottomUp, int topLimit, int hysteresisPx)
     {
         var count = centresBottomUp.Count;
@@ -69,7 +57,7 @@ internal static class BarBallistics
         return n;
     }
 
-    /// <param name="decayPerSecond">Linear fall rate of the marker after the hold time, in display units per second.</param>
+    /// <param name="decayPerSecond">Marker fall rate after the hold time, in display units per second.</param>
     public static void StepPeak(ref float peak, ref float holdLeftMs, float level, float dtMs, int holdMs, float decayPerSecond, float minimum)
     {
         if (level >= peak)

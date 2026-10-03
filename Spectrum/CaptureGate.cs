@@ -2,13 +2,13 @@ namespace Spectrum;
 
 internal enum CaptureAction
 {
-    /// <summary>Analyse the latest samples and publish a frame.</summary>
+    /// <summary>Analyze the latest samples and publish a frame.</summary>
     Analyze,
 
-    /// <summary>Confirmed silence or gap: publish the floor.</summary>
+    /// <summary>Publish the floor after confirming silence or a gap.</summary>
     PublishSilence,
 
-    /// <summary>Not enough evidence either way (e.g. a transient BASS error): publish nothing.</summary>
+    /// <summary>Wait when evidence is inconclusive, such as after a transient BASS error.</summary>
     Wait,
 }
 
@@ -22,28 +22,11 @@ internal readonly struct CaptureDecision
 
     public CaptureAction Action { get; }
 
-    /// <summary>The capture looks hung: re-initialise the device.</summary>
+    /// <summary>Indicates that the capture appears hung and needs reinitialization.</summary>
     public bool RecoverDevice { get; }
 }
 
-/// <summary>
-/// Per-tick decision for the analysis timer, kept free of BASS so it can be tested:
-/// <list type="bullet">
-/// <item>level &lt; 0 is a BASS error ("no data"): counts toward silence, never feeds the hang detector;</item>
-/// <item>level == 0, or no new captured frames since the previous tick (loopback delivers nothing while
-///   nothing plays), counts toward silence; after <c>silenceTicksRequired</c> consecutive ticks the floor is
-///   published;</item>
-/// <item>a confirmed stall marks a gap: frames captured before it must not be analysed together with the audio
-///   that arrives after it (<see cref="GapEndFrame"/>). A single tick without new frames is normal jitter and
-///   does not mark a gap.</item>
-/// <item>device hang: no new frames while BASS keeps reporting the same non-zero level for more than
-///   <c>hangTicksThreshold</c> ticks. A steady signal (test tone, drone, pad) legitimately has a constant level, so
-///   level equality alone is never a hang — frames must also have stopped. At most one recovery is requested per
-///   stall episode; the next needs frames to have flowed again, so a stale level during a pause cannot cause
-///   a recovery loop.</item>
-/// </list>
-/// Timer-thread only.
-/// </summary>
+/// <summary>Tracks silence, stream gaps, and device hangs per timer tick without depending on BASS.</summary>
 internal sealed class CaptureGate
 {
     private readonly int _silenceTicksRequired;
@@ -65,11 +48,10 @@ internal sealed class CaptureGate
     /// <summary>Absolute frame index before which captured audio is excluded from analysis (0 = none).</summary>
     public long GapEndFrame { get; private set; }
 
-    /// <param name="level">BASS_WASAPI_GetLevel result (−1 on error).</param>
-    /// <param name="totalFrames">Frames captured so far in <paramref name="stream"/>.</param>
-    /// <param name="stream">Identity of the current capture stream; a new identity resets stall tracking.</param>
-    /// <param name="streamStartFrame">History frame count when that stream started: anything older belongs to a
-    /// previous stream (e.g. before a device recovery) and is excluded from analysis.</param>
+    /// <param name="level">The BASS_WASAPI_GetLevel result, or −1 on error.</param>
+    /// <param name="totalFrames">Frames captured so far by <paramref name="stream"/>.</param>
+    /// <param name="stream">Current capture stream; a new instance resets stall tracking.</param>
+    /// <param name="streamStartFrame">Starting frame index; earlier audio belongs to a previous stream.</param>
     public CaptureDecision Next(int level, long totalFrames, object stream, long streamStartFrame)
     {
         var sameStream = ReferenceEquals(stream, _stream);
@@ -84,8 +66,7 @@ internal sealed class CaptureGate
 
         var recover = UpdateHangDetection(level, stalled, sameStream);
 
-        // Gap tracking is independent of the level (BASS can report an error level while the stream is stalled):
-        // only consecutive ticks without new frames count, so a single late callback is not a gap.
+        // Track gaps by consecutive ticks without new frames, regardless of the reported level.
         _stallTicks = stalled ? _stallTicks + 1 : 0;
         if (_stallTicks >= _silenceTicksRequired)
         {
@@ -116,7 +97,7 @@ internal sealed class CaptureGate
 
     private bool UpdateHangDetection(int level, bool stalled, bool sameStream)
     {
-        // Frames flowing on the same stream ends the stall episode and re-arms recovery.
+        // New frames on this stream end the stall and re-arm recovery.
         if (sameStream && !stalled)
         {
             _recoveryRequestedThisStall = false;

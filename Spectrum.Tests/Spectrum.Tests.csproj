@@ -18,4 +18,9 @@
     <ProjectReference Include="..\Spectrum\Spectrum.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
 </Project>

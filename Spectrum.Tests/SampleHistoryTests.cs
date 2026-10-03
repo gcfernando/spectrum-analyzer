@@ -58,7 +58,7 @@ public class SampleHistoryTests
     [Fact]
     public void FramesBeforeAGap_AreExcludedFromTheSnapshot()
     {
-        // 50 frames before a pause, then 10 frames after it resumed at frame 50.
+        // 50 frames before the pause; 10 frames after resume.
         var h = new SampleHistory(1, 64);
         h.Write(Ramp(0, 50, 1), 50);
         h.Write(Ramp(50, 10, 1), 10);
@@ -69,7 +69,7 @@ public class SampleHistoryTests
         Assert.Equal(60, end);
         for (var i = 0; i < 22; i++)
         {
-            Assert.Equal(0f, dest[i]); // pre-gap audio replaced by silence
+            Assert.Equal(0f, dest[i]); // Pre-gap audio is replaced by silence.
         }
 
         for (var i = 0; i < 10; i++)
@@ -77,7 +77,7 @@ public class SampleHistoryTests
             Assert.Equal((50 + i) * 10f, dest[22 + i]);
         }
 
-        // Once enough new audio has arrived the gap no longer affects the window.
+        // Once enough new audio arrives, the gap no longer affects the window.
         h.Write(Ramp(60, 40, 1), 40);
         Assert.True(h.TryCopyLatest(dest, 32, out _, discardBeforeFrame: 50));
         Assert.Equal(68 * 10f, dest[0]);
@@ -90,7 +90,7 @@ public class SampleHistoryTests
         h.Write(Ramp(0, 40, 1), 40);
         var dest = new float[16];
         Assert.True(h.TryCopyLatest(dest, 16, out var end));
-        Assert.Equal(16, end); // only the frames that could be stored are counted
+        Assert.Equal(16, end); // Only the frames that could be stored are counted.
         for (var i = 0; i < 16; i++)
         {
             Assert.Equal((24 + i) * 10f, dest[i]);
@@ -100,18 +100,13 @@ public class SampleHistoryTests
     [Fact]
     public async Task ConcurrentProducer_NeverYieldsATornSnapshot()
     {
-        // Producer writes a strictly increasing frame counter; any snapshot the consumer accepts must be
-        // a contiguous run of consecutive frames. A torn read would show a discontinuity.
-        // The ring has only a small margin over the window so the unthrottled producer laps the reader often:
-        // the torn-read validation must actually fire (rejected > 0) and every accepted snapshot must be clean.
+        // Producer writes a strictly increasing frame counter; snapshots must be contiguous runs of frames.
         const int channels = 2, window = 4096, chunk = 480;
-        // Capacity = window + one in-flight chunk: a snapshot is accepted only if the producer made no further
-        // progress into the region during the copy.
+        // Capacity is window + one in-flight chunk; snapshots only copy while the producer stays behind.
         var h = new SampleHistory(channels, window + chunk);
         using var stop = new CancellationTokenSource();
 
-        // Precomputed ramp so the producer runs at memcpy speed (a per-frame fill loop is too slow on x86 to ever
-        // lap the reader). Frame value = frame index modulo the cycle; the cycle is a whole number of chunks.
+        // Ramp keeps producer writes memcpy-fast.
         const int cycle = chunk * 136;
         var ramp = new float[cycle * channels];
         for (var i = 0; i < cycle; i++)
@@ -143,8 +138,7 @@ public class SampleHistoryTests
         int accepted = 0, rejected = 0;
         try
         {
-            // Race for at least 2 s AND until there is enough evidence, so a fast machine does not stop early and a
-            // loaded machine only makes the test slower (60 s cap).
+            // Run for at least 2 s or until evidence is clear; loaded machines just wait a bit longer.
             var started = DateTime.UtcNow;
             while ((DateTime.UtcNow - started < TimeSpan.FromSeconds(2) || accepted < 200 || rejected == 0)
                    && DateTime.UtcNow - started < TimeSpan.FromSeconds(60))
@@ -174,7 +168,7 @@ public class SampleHistoryTests
         }
         finally
         {
-            stop.Cancel(); // never leave the producer spinning, even when an assertion fails
+            stop.Cancel(); // Never leave the producer spinning on failure.
         }
 
         await producer;

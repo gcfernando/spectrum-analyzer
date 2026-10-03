@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Configuration;
 using System.Drawing;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -12,36 +13,34 @@ public partial class FormAudioSpectrum : Form
 {
     private const int BAR_COUNT = 83;
     private const int NOISE_GATE_THRESHOLD = 2;
+    private static readonly string[] s_advancedModes =
+    {
+        "Waterfall", "Radial Spectrum", "Contour", "Note Map"
+    };
     private static readonly string[] s_visualModes =
     {
-        "Spectrum", "Bricks", "LED", "Dots", "Wave", "Pulse", "Center", "Mirror", "Glow"
+        "Spectrum", "Bricks", "LED", "Dots", "Wave", "Pulse", "Center", "Mirror", "Glow",
+        "Lollipop", "Waterfall", "Radial Spectrum", "Contour", "Note Map"
     };
     private static readonly string[] s_colorThemes =
     {
         "ClassicSmooth", "Ice", "Sunset", "MonoCyan", "Synthwave", "Aurora"
     };
 
-    // Default "Spectrum" (analyzer) mode presentation ballistics, all driven by elapsed time.
-    // Attack: a full-scale (72 dB) rise completes in 45 ms, about 1.5 analysis hops (~32 ms each), so the bar interpolates
-    // between analysis frames without adding more than about one hop of visible lag to transients.
-    // Release: exponential time constant; a natural decay of about 0.9 s to 10 % of the height.
-    // Peak hold: marker holds 300 ms, then falls at PeakDecayPerTick per 1/60 s, independent of the bar.
+    // Spectrum mode uses elapsed-time ballistics: a 45 ms attack, 380 ms release, and 300 ms peak hold.
     internal const int SPECTRUM_ATTACK_MS = 45;
     internal const int SPECTRUM_RELEASE_MS = 380;
     internal const int SPECTRUM_PEAK_HOLD_MS = 300;
 
-    // Frequency axis: landmark labels placed with the same logarithmic mapping as the bars (BandPlan).
+    // Frequency landmarks use the same logarithmic mapping as the bars.
     private static readonly double[] s_axisLandmarksHz = { 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000 };
-    private const float AXIS_LABEL_HEIGHT = 14f;   // design-time pixels at the 378 px reference height
+    private const float AXIS_LABEL_HEIGHT = 14f; // Design-time pixels at the 378 px reference height.
     private const int AXIS_LABEL_MIN_GAP = 4;
 
-    // Level (dB) axis: landmark labels placed on both sides of the bars, mapped with the same
-    // LevelScale.Normalize used to size the bars, so a label always lines up with the bar height
-    // it names. Present from startup, like the frequency axis.
+    // dB landmarks appear on both sides of the bars and use LevelScale.Normalize to match bar heights.
     private static readonly double[] s_axisLandmarksDb = { 0, -12, -24, -36, -48, -60, -72 };
 
-    // Reference-scale tick lines drawn inside every bar (excludes the 0/-72 extremes, which already
-    // coincide with each bar's own top/bottom border).
+    // Reference-scale ticks appear inside each bar, excluding the 0 and -72 dB border lines.
     private static readonly float[] s_gridlineLevels = BuildGridlineLevels();
 
     private static float[] BuildGridlineLevels()
@@ -52,17 +51,16 @@ public partial class FormAudioSpectrum : Form
         return levels;
     }
 
-    // Geometry used before the device sample rate is known (identical for every rate >= 41.8 kHz).
+    // Default geometry is valid before the device sample rate is known for rates of at least 41.8 kHz.
     private static readonly BandPlan s_defaultPlan = BandPlan.CreateLogarithmic(BAR_COUNT, 20, 20000, 48000);
 
     private VerticalProgressBar[] _progressBars;
+    private AdvancedVisualizationControl _advancedVisualizer;
     private Label[] _axisLabels;
     private Label[] _dbAxisLabelsLeft;
     private Label[] _dbAxisLabelsRight;
 
-    // Mirrored copies of the dB labels, used only in Center/Mirror mode: those modes fill the bar
-    // symmetrically about its vertical middle, so most landmark values occur at two heights (equidistant
-    // above and below centre) instead of one. Hidden/unused in every other mode.
+    // Center and Mirror modes show dB labels above and below the midpoint; other modes use the standard labels.
     private Label[] _dbAxisLabelsLeftMirror;
     private Label[] _dbAxisLabelsRightMirror;
 
@@ -71,10 +69,18 @@ public partial class FormAudioSpectrum : Form
     private string _barTheme;
     private ComboBox _modeSelector;
     private ComboBox _themeSelector;
+    private Button _rotationSettingsButton;
+    private ToolTip _selectionToolTip;
     private FlowLayoutPanel _selectionPanel;
     private Label _modeSelectorLabel;
     private Label _themeSelectorLabel;
     private bool _initializingSelectors;
+    private bool _randomRotationEnabled;
+    private bool _applyingRandomSelection;
+    private bool _automaticSaveErrorShown;
+    private int _rotationIntervalMinutes = 5;
+    private readonly Random _random = new();
+    private System.Windows.Forms.Timer _rotationTimer;
     private readonly byte[] _spectrumBuffer;
     private readonly byte[] _applyBuffer;
 
@@ -119,6 +125,11 @@ public partial class FormAudioSpectrum : Form
             SelectNextItem(_themeSelector);
             e.Handled = true;
         }
+        else if (e.Control && e.KeyCode == Keys.R)
+        {
+            ShowRotationSettings();
+            e.Handled = true;
+        }
     }
 
     private static void SelectNextItem(ComboBox selector)
@@ -129,9 +140,17 @@ public partial class FormAudioSpectrum : Form
 
     private void FormAudioSpectrum_Load(object sender, EventArgs e)
     {
-        var configuredMode = ConfigurationManager.AppSettings["Mode"];
+        var preferences = VisualizerPreferences.Default;
+        var configuredMode = string.IsNullOrWhiteSpace(preferences.Mode)
+            ? ConfigurationManager.AppSettings["Mode"]
+            : preferences.Mode;
+        var configuredTheme = string.IsNullOrWhiteSpace(preferences.Theme)
+            ? ConfigurationManager.AppSettings["Theme"]
+            : preferences.Theme;
         _visualMode = ResolveConfiguredMode(configuredMode);
-        _barTheme = ResolveConfiguredTheme(ConfigurationManager.AppSettings["Theme"]);
+        _barTheme = ResolveConfiguredTheme(configuredTheme);
+        _randomRotationEnabled = string.Equals(preferences.RotationMode, "Random", StringComparison.OrdinalIgnoreCase);
+        _rotationIntervalMinutes = Math.Max(1, Math.Min(240, preferences.RotationIntervalMinutes));
 
         _initializingSelectors = true;
         try
@@ -145,6 +164,8 @@ public partial class FormAudioSpectrum : Form
         }
 
         InitializeBarsOptimized(_visualMode);
+        UpdateRotationSettingsButton();
+        ConfigureRotationTimer();
         CenterToScreen();
 
         _analyzer = new Analyzer();
@@ -203,10 +224,29 @@ public partial class FormAudioSpectrum : Form
         _themeSelector.AccessibleDescription = "Press Ctrl+T to cycle bar color themes";
         _themeSelector.TabIndex = 1;
 
+        _rotationSettingsButton = new Button
+        {
+            FlatStyle = FlatStyle.Flat,
+            ForeColor = Color.FromArgb(235, 232, 225),
+            BackColor = Color.FromArgb(38, 35, 29),
+            Font = ambiance_ThemeSpectrum.Font,
+            Name = "rotationSettingsButton",
+            Size = new Size(76, 24),
+            Text = "Fixed",
+            TabIndex = 2,
+            Margin = new Padding(8, 0, 0, 0),
+            AccessibleName = "Mode and theme rotation settings"
+        };
+        _rotationSettingsButton.FlatAppearance.BorderColor = Color.FromArgb(82, 75, 60);
+        _rotationSettingsButton.Click += (sender, args) => ShowRotationSettings();
+        _selectionToolTip = new ToolTip();
+        _selectionToolTip.SetToolTip(_rotationSettingsButton, "Choose fixed or timed random mode and theme (Ctrl+R)");
+
         _selectionPanel.Controls.Add(_modeSelectorLabel);
         _selectionPanel.Controls.Add(_modeSelector);
         _selectionPanel.Controls.Add(_themeSelectorLabel);
         _selectionPanel.Controls.Add(_themeSelector);
+        _selectionPanel.Controls.Add(_rotationSettingsButton);
         _modeSelector.SelectedIndexChanged += ModeSelector_SelectedIndexChanged;
         _themeSelector.SelectedIndexChanged += ThemeSelector_SelectedIndexChanged;
         ambiance_ThemeSpectrum.Controls.Add(_selectionPanel);
@@ -243,13 +283,13 @@ public partial class FormAudioSpectrum : Form
         _themeSelectorLabel.Visible = !compact;
         _modeSelector.Width = compact ? 80 : 98;
         _themeSelector.Width = compact ? 92 : 140;
-        _selectionPanel.Width = compact ? 179 : 348;
+        _rotationSettingsButton.Visible = width >= 320;
+        _rotationSettingsButton.Width = compact ? 64 : 76;
+        _selectionPanel.Width = compact ? 252 : 432;
         _selectionPanel.Location = new Point(
             Math.Max(60, width - _selectionPanel.Width - 16),
             7);
-        ambiance_ThemeSpectrum.Text = width < 460
-            ? string.Empty
-            : width < 920 ? "Spectrum" : "Audio Spectrum Analyzer";
+        ambiance_ThemeSpectrum.Text = width < 1000 ? string.Empty : "Audio Spectrum Analyzer";
     }
 
     private static string ResolveConfiguredChoice(string configuredValue, string[] choices, string fallback)
@@ -296,6 +336,31 @@ public partial class FormAudioSpectrum : Form
         return ResolveConfiguredChoice(normalized, s_colorThemes, "ClassicSmooth");
     }
 
+    private static bool IsAdvancedMode(string mode)
+    {
+        foreach (var advancedMode in s_advancedModes)
+        {
+            if (string.Equals(mode, advancedMode, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static AdvancedVisualizationMode ResolveAdvancedMode(string mode)
+    {
+        switch ((mode ?? string.Empty).Trim().ToLowerInvariant())
+        {
+            case "waterfall":
+                return AdvancedVisualizationMode.Waterfall;
+            case "radial spectrum":
+                return AdvancedVisualizationMode.RadialSpectrum;
+            case "note map":
+                return AdvancedVisualizationMode.NoteMap;
+            default:
+                return AdvancedVisualizationMode.Contour;
+        }
+    }
+
     private void ModeSelector_SelectedIndexChanged(object sender, EventArgs e)
     {
         if (_initializingSelectors || _progressBars == null || !(_modeSelector.SelectedItem is string mode))
@@ -312,6 +377,11 @@ public partial class FormAudioSpectrum : Form
             progress.Invalidate();
         }
 
+        _advancedVisualizer.Mode = ResolveAdvancedMode(mode);
+        _advancedVisualizer.ThemeName = _barTheme;
+        if (!_applyingRandomSelection)
+            SaveVisualPreferences();
+        ResetRotationTimer();
         RecalculateBarLayout();
     }
 
@@ -322,11 +392,160 @@ public partial class FormAudioSpectrum : Form
 
         _barTheme = themeName;
         var theme = BarColorThemes.Resolve(themeName);
+        _advancedVisualizer.ThemeName = themeName;
         foreach (var progress in _progressBars)
         {
             ApplyColorThemeOptimized(progress, theme);
             progress.Invalidate();
         }
+        if (!_applyingRandomSelection)
+            SaveVisualPreferences();
+        ResetRotationTimer();
+    }
+
+    private void ShowRotationSettings()
+    {
+        using var dialog = new RotationSettingsForm(_randomRotationEnabled, _rotationIntervalMinutes);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        var oldRandomEnabled = _randomRotationEnabled;
+        var oldInterval = _rotationIntervalMinutes;
+        _randomRotationEnabled = dialog.RandomEnabled;
+        _rotationIntervalMinutes = dialog.IntervalMinutes;
+        if (!SaveVisualPreferences())
+        {
+            _randomRotationEnabled = oldRandomEnabled;
+            _rotationIntervalMinutes = oldInterval;
+            var preferences = VisualizerPreferences.Default;
+            preferences.RotationMode = oldRandomEnabled ? "Random" : "Fixed";
+            preferences.RotationIntervalMinutes = oldInterval;
+            return;
+        }
+
+        UpdateRotationSettingsButton();
+        ConfigureRotationTimer();
+    }
+
+    private void UpdateRotationSettingsButton()
+    {
+        if (_rotationSettingsButton == null)
+            return;
+
+        var compact = ambiance_ThemeSpectrum.ClientSize.Width < 800;
+        _rotationSettingsButton.Text = !_randomRotationEnabled
+            ? "Fixed"
+            : compact ? "Random" : $"Random {_rotationIntervalMinutes}m";
+        _rotationSettingsButton.AccessibleDescription = _randomRotationEnabled
+            ? $"Random mode and theme selection, changing every {_rotationIntervalMinutes} minutes. Press Ctrl+R to change."
+            : "Fixed mode and theme selection. Press Ctrl+R to change.";
+    }
+
+    private void ConfigureRotationTimer()
+    {
+        if (_rotationTimer == null)
+        {
+            _rotationTimer = new System.Windows.Forms.Timer();
+            _rotationTimer.Tick += RotationTimer_Tick;
+        }
+
+        if (_randomRotationEnabled)
+        {
+            _rotationTimer.Stop();
+            _rotationTimer.Interval = GetRotationIntervalMilliseconds(_rotationIntervalMinutes);
+            _rotationTimer.Start();
+        }
+        else
+        {
+            _rotationTimer.Stop();
+        }
+        UpdateRotationSettingsButton();
+    }
+
+    private void ResetRotationTimer()
+    {
+        if (!_randomRotationEnabled || _rotationTimer == null)
+            return;
+        _rotationTimer.Stop();
+        _rotationTimer.Start();
+    }
+
+    private void RotationTimer_Tick(object sender, EventArgs e)
+    {
+        _applyingRandomSelection = true;
+        try
+        {
+            _modeSelector.SelectedIndex = GetDifferentRandomIndex(_modeSelector.SelectedIndex, _modeSelector.Items.Count, _random);
+            _themeSelector.SelectedIndex = GetDifferentRandomIndex(_themeSelector.SelectedIndex, _themeSelector.Items.Count, _random);
+        }
+        finally
+        {
+            _applyingRandomSelection = false;
+        }
+
+        SaveVisualPreferences(automatic: true);
+    }
+
+    internal static int GetRotationIntervalMilliseconds(int minutes)
+    {
+        if (minutes < 1 || minutes > 240)
+            throw new ArgumentOutOfRangeException(nameof(minutes), "The rotation interval must be 1 to 240 minutes.");
+        return checked(minutes * 60 * 1000);
+    }
+
+    internal static int GetDifferentRandomIndex(int current, int count, Random random)
+    {
+        if (random == null)
+            throw new ArgumentNullException(nameof(random));
+        if (count < 1)
+            throw new ArgumentOutOfRangeException(nameof(count));
+        if (count == 1)
+            return 0;
+        if (current < 0 || current >= count)
+            return random.Next(count);
+
+        var next = random.Next(count - 1);
+        if (next >= current)
+            next++;
+        return next;
+    }
+
+    private bool SaveVisualPreferences(bool automatic = false)
+    {
+        var preferences = VisualizerPreferences.Default;
+        preferences.Mode = _visualMode;
+        preferences.Theme = _barTheme;
+        preferences.RotationMode = _randomRotationEnabled ? "Random" : "Fixed";
+        preferences.RotationIntervalMinutes = _rotationIntervalMinutes;
+        try
+        {
+            preferences.Save();
+            _automaticSaveErrorShown = false;
+            return true;
+        }
+        catch (ConfigurationErrorsException ex)
+        {
+            ReportPreferenceSaveError(ex, automatic);
+        }
+        catch (IOException ex)
+        {
+            ReportPreferenceSaveError(ex, automatic);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            ReportPreferenceSaveError(ex, automatic);
+        }
+        return false;
+    }
+
+    private void ReportPreferenceSaveError(Exception exception, bool automatic)
+    {
+        if (automatic && _automaticSaveErrorShown)
+            return;
+
+        _automaticSaveErrorShown = automatic;
+        MessageBox.Show(this, $"Current choices will apply until the application closes, but could not be saved.\n\n{exception.Message}",
+            "Preferences not saved", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 
     private void InitializeBarsOptimized(string visualMode)
@@ -359,6 +578,16 @@ public partial class FormAudioSpectrum : Form
                 _progressBars[i] = progress;
                 ambiance_ThemeSpectrum.Controls.Add(progress);
             }
+
+            _advancedVisualizer = new AdvancedVisualizationControl
+            {
+                BackColor = Color.FromArgb(38, 35, 29),
+                ForeColor = Color.FromArgb(215, 210, 196),
+                Mode = ResolveAdvancedMode(visualMode),
+                ThemeName = _barTheme,
+                Visible = IsAdvancedMode(visualMode)
+            };
+            ambiance_ThemeSpectrum.Controls.Add(_advancedVisualizer);
 
             _axisLabels = new Label[s_axisLandmarksHz.Length];
             for (var i = 0; i < _axisLabels.Length; i++)
@@ -460,15 +689,15 @@ public partial class FormAudioSpectrum : Form
         var barH   = Math.Max(10, ch - startY - bottomReserve);
         var axisLabelY = startY + barH + dbLabelHalf + AXIS_LABEL_MIN_GAP;
 
-        // Keep a margin on both sides that scales with the container width, widened as needed so the
-        // dB axis labels have room to sit left/right of the bars without overlapping them.
+        // Scale the side margins as needed to fit the dB labels without overlapping the bars.
         var baseMarginX = Math.Max(4, (int)Math.Round(11f * (float)cw / 1184f));
         var dbLabelReserve = GetMaxDbAxisLabelWidth() + 2 * AXIS_LABEL_MIN_GAP;
         var marginX = Math.Max(baseMarginX, dbLabelReserve);
 
-        // Float stride within the available area so all 83 bars fit exactly, with no side overflow.
+        // Use a fractional stride so all 83 bars fit without overflow.
         var availW  = cw - 2 * marginX;
         var strideF = (float)availW / BAR_COUNT;
+        var advancedMode = IsAdvancedMode(_visualMode);
 
         ambiance_ThemeSpectrum.SuspendLayout();
         try
@@ -479,33 +708,56 @@ public partial class FormAudioSpectrum : Form
                 var nextX = marginX + (int)((i + 1) * strideF);
                 _progressBars[i].Location = new Point(x, startY);
                 _progressBars[i].Size     = new Size(Math.Max(2, nextX - x), barH);
+                _progressBars[i].Visible = !advancedMode;
             }
 
+            _advancedVisualizer.Location = new Point(marginX, startY);
+            _advancedVisualizer.Size = new Size(Math.Max(1, availW), barH);
+            _advancedVisualizer.Visible = advancedMode;
+            _advancedVisualizer.SetBandPlan(_analyzer?.CurrentBandPlan ?? s_defaultPlan);
             LayoutAxisLabels(marginX, strideF, axisLabelY, cw);
 
-            // Line labels up with the bar's actual painted fill area, not its full control bounds: OnPaint
-            // insets the fill by BrickPadding on every side, so the dB axis must use the same inset.
-            var fillPadding = _progressBars.Length > 0 ? _progressBars[0].BrickPadding : 0;
-            var fillTop = startY + fillPadding;
-            var fillH = Math.Max(1, barH - 2 * fillPadding);
-            var topBound = Math.Max(0, startY - dbLabelHalf);
-            var bottomBound = axisLabelY - AXIS_LABEL_MIN_GAP;
-
-            if (IsSymmetricFillMode(_visualMode, out var invertedFromCenter))
+            if (advancedMode)
             {
-                LayoutDbAxisLabelsSymmetric(marginX, fillTop, fillH, cw, topBound, bottomBound, invertedFromCenter);
+                HideDbAxisLabels(_dbAxisLabelsLeft);
+                HideDbAxisLabels(_dbAxisLabelsRight);
+                HideDbAxisLabels(_dbAxisLabelsLeftMirror);
+                HideDbAxisLabels(_dbAxisLabelsRightMirror);
+                if (_visualMode.Equals("Radial Spectrum", StringComparison.OrdinalIgnoreCase)
+                    || _visualMode.Equals("Note Map", StringComparison.OrdinalIgnoreCase))
+                    HideFrequencyAxisLabels();
             }
             else
             {
-                HideDbAxisLabels(_dbAxisLabelsLeftMirror);
-                HideDbAxisLabels(_dbAxisLabelsRightMirror);
-                LayoutDbAxisLabels(marginX, fillTop, fillH, cw, topBound, bottomBound);
+                var fillPadding = _progressBars.Length > 0 ? _progressBars[0].BrickPadding : 0;
+                var fillTop = startY + fillPadding;
+                var fillH = Math.Max(1, barH - 2 * fillPadding);
+                var topBound = Math.Max(0, startY - dbLabelHalf);
+                var bottomBound = axisLabelY - AXIS_LABEL_MIN_GAP;
+
+                if (IsSymmetricFillMode(_visualMode, out var invertedFromCenter))
+                {
+                    LayoutDbAxisLabelsSymmetric(marginX, fillTop, fillH, cw, topBound, bottomBound, invertedFromCenter);
+                }
+                else
+                {
+                    HideDbAxisLabels(_dbAxisLabelsLeftMirror);
+                    HideDbAxisLabels(_dbAxisLabelsRightMirror);
+                    LayoutDbAxisLabels(marginX, fillTop, fillH, cw, topBound, bottomBound);
+                }
             }
         }
         finally
         {
             ambiance_ThemeSpectrum.ResumeLayout(false);
         }
+    }
+
+    private void HideFrequencyAxisLabels()
+    {
+        if (_axisLabels == null) return;
+        foreach (var label in _axisLabels)
+            label.Visible = false;
     }
 
     private void LayoutAxisLabels(int marginX, float strideF, int labelY, int containerWidth)
@@ -521,15 +773,15 @@ public partial class FormAudioSpectrum : Form
             var label = _axisLabels[i];
             var hz = s_axisLandmarksHz[i];
 
-            // Never label frequencies the analysis does not cover (e.g. above Nyquist on a low-rate device).
+            // Omit frequencies outside the analysis range, such as those above Nyquist.
             var inRange = hz >= plan.MinHz && hz <= plan.MaxHz;
 
-            // Same mapping as the bars: bar i spans [i, i+1) in plan position units.
+            // Match the bar mapping: bar i spans [i, i+1) in plan-position units.
             var centerX = marginX + (int)Math.Round(plan.FrequencyToPosition(hz) * strideF);
             var w = label.PreferredWidth;
             var left = Math.Max(0, Math.Min(containerWidth - w, centerX - (w / 2)));
 
-            // Skip labels that would collide with the previous one on narrow windows.
+            // Skip labels that would overlap on narrow windows.
             var visible = inRange && left >= previousRight + AXIS_LABEL_MIN_GAP;
             label.Visible = visible;
             if (!visible) continue;
@@ -539,8 +791,7 @@ public partial class FormAudioSpectrum : Form
         }
     }
 
-    // Level (dB) axis: positions mirror LevelScale.Normalize so a label's vertical centre lines up with the
-    // bar height that dB value would produce (0 dBFS at the top, -72 dBFS floor at the bottom).
+    // dB-axis labels use LevelScale.Normalize so each label aligns with its bar height (0 dBFS to -72 dBFS).
     private void LayoutDbAxisLabels(int marginX, int startY, int barH, int containerWidth, int topBound, int bottomBound)
     {
         if (_dbAxisLabelsLeft == null || _dbAxisLabelsRight == null) return;
@@ -579,11 +830,7 @@ public partial class FormAudioSpectrum : Form
         }
     }
 
-    // Center/Mirror fill symmetrically about the bar's vertical middle instead of bottom-up, so their dB axis
-    // must mirror the same way (see DrawMode_CenterBricks/DrawMode_MirrorBricks in VerticalProgressBar.cs):
-    // Center grows from the middle (silence) out to the edges (0 dBFS at full scale), while Mirror grows from
-    // the edges (silence) in to the middle (0 dBFS at full scale) - the exact opposite direction.
-    // "invertedFromCenter" is true for Mirror, flipping which extreme sits at the middle vs. the edges.
+    // Center and Mirror fill around the midpoint in opposite directions, so their dB labels follow the same mapping.
     private static bool IsSymmetricFillMode(string visualMode, out bool invertedFromCenter)
     {
         switch ((visualMode ?? string.Empty).Trim().ToLowerInvariant())
@@ -607,10 +854,7 @@ public partial class FormAudioSpectrum : Form
             if (label != null) label.Visible = false;
     }
 
-    // Lays out the dB axis for Center/Mirror mode: each landmark's vertical distance from the bar's middle
-    // is proportional to its normalized level (same LevelScale.Normalize used everywhere else), mirrored
-    // above and below centre to match the bar's actual symmetric fill. A landmark whose distance rounds to
-    // zero (the value that sits exactly at the middle) only needs one label, not an overlapping duplicate.
+    // Center and Mirror labels are placed symmetrically by normalized distance from the bar's midpoint.
     private void LayoutDbAxisLabelsSymmetric(
         int marginX, int startY, int barH, int containerWidth, int topBound, int bottomBound, bool invertedFromCenter)
     {
@@ -625,11 +869,7 @@ public partial class FormAudioSpectrum : Form
         var previousTopLeftMirror = int.MaxValue;
         var previousTopRightMirror = int.MaxValue;
 
-        // Collision tracking below assumes labels are visited edge-first, walking inward toward the middle
-        // (so each accepted label's bound only ever needs comparing against its immediate, already-placed
-        // neighbour). s_axisLandmarksDb is ordered 0 down to -72, which is already edge-to-middle for Center
-        // (0 dBFS sits at the edge) but middle-to-edge for Mirror (0 dBFS sits at the middle instead) - so
-        // sort explicitly by descending distance-from-middle rather than relying on array order.
+        // Sort from the edges inward so collision checks only need the previously placed neighbor.
         var order = new int[s_axisLandmarksDb.Length];
         var distances = new int[s_axisLandmarksDb.Length];
         for (var i = 0; i < s_axisLandmarksDb.Length; i++)
@@ -670,7 +910,7 @@ public partial class FormAudioSpectrum : Form
                 previousBottomRight = top + right.Height;
             }
 
-            // The mirrored (lower) copy is only needed once the upper/lower positions actually differ.
+            // Add the lower label only when its position differs from the upper one.
             var leftMirror = _dbAxisLabelsLeftMirror[i];
             var topMirror = lowerCenterY - leftMirror.Height / 2;
             var visibleLeftMirror = distance > 0 && topMirror >= topBound && topMirror + leftMirror.Height <= bottomBound
@@ -736,8 +976,7 @@ public partial class FormAudioSpectrum : Form
         bool postNeeded;
         lock (_updateLock)
         {
-            // Latest frame wins: always overwrite the pending buffer so the UI never applies a stale frame,
-            // but post at most one UI update at a time.
+            // Keep only the latest frame and post at most one UI update at a time.
             var count = Math.Min(spectrum.Count, BAR_COUNT);
             for (var i = 0; i < count; i++)
             {
@@ -768,13 +1007,16 @@ public partial class FormAudioSpectrum : Form
             Buffer.BlockCopy(_spectrumBuffer, 0, _applyBuffer, 0, BAR_COUNT);
         }
 
-        // An update posted before the form was cleaned up can still be dispatched afterwards.
+        // A queued update may arrive after the form has been disposed.
         if (_isDisposed || _progressBars == null) return;
 
         for (var i = 0; i < BAR_COUNT; i++)
         {
             _progressBars[i].SetTargetValueUI(_applyBuffer[i]);
         }
+
+        if (IsAdvancedMode(_visualMode))
+            _advancedVisualizer.SetSpectrum(_applyBuffer);
 
         var plan = _analyzer?.CurrentBandPlan;
         if (plan != null && !ReferenceEquals(plan, _layoutPlan))
@@ -893,6 +1135,11 @@ public partial class FormAudioSpectrum : Form
         _isDisposed = true;
 
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        _rotationTimer?.Stop();
+        _rotationTimer?.Dispose();
+        _rotationTimer = null;
+        _selectionToolTip?.Dispose();
+        _selectionToolTip = null;
 
         if (_analyzer != null)
         {
@@ -910,6 +1157,9 @@ public partial class FormAudioSpectrum : Form
             }
             _progressBars = null;
         }
+
+        _advancedVisualizer?.Dispose();
+        _advancedVisualizer = null;
 
         if (_axisLabels != null)
         {

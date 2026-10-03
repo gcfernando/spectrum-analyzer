@@ -418,8 +418,6 @@ public class Ambiance_ThemeContainer : ContainerControl
         var bodyRect = new Rectangle(1, 37, Math.Max(1, Width - 2), Math.Max(0, Height - 47));
         if (bodyRect.Width > 0 && bodyRect.Height > 0)
         {
-            // Subtle top-to-bottom vignette instead of a flat fill, so the panel behind the bars has a hint
-            // of depth rather than looking like a plain gray rectangle.
             if (_bodyGradientBrush == null || _bodyGradientSize != bodyRect.Size)
             {
                 _bodyGradientBrush?.Dispose();
@@ -823,7 +821,6 @@ public class Ambiance_ProgressBar : Control
         R1 = new Rectangle(0, 2, Width - 1, Height - 1);
         GB1 = new LinearGradientBrush(R1, Color.FromArgb(255, 255, 255), Color.FromArgb(230, 230, 230), 90f);
 
-        // Draw inside background
         G.FillRectangle(new SolidBrush(Color.FromArgb(244, 241, 243)), R1);
         G.SetClip(GP1);
         G.FillPath(new SolidBrush(Color.FromArgb(244, 241, 243)), RoundRectangle.RoundRect(new Rectangle(1, 1, Width - 3, (Height / 2) - 2), 4));
@@ -836,10 +833,8 @@ public class Ambiance_ProgressBar : Control
             R2 = new Rectangle(1, 1, I1, Height - 3);
             GB2 = new LinearGradientBrush(R2, Color.FromArgb(214, 89, 37), Color.FromArgb(223, 118, 75), 90f);
 
-            // Fill the value with its gradient
             G.FillPath(GB2, GP3);
 
-            // Draw diagonal lines
             if (_DrawHatch == true)
             {
                 for (var i = 0; i <= (Width - 1) * _Maximum / _Value; i += 20)
@@ -854,7 +849,6 @@ public class Ambiance_ProgressBar : Control
             G.ResetClip();
         }
 
-        // Draw value as a string
         var DrawString = Convert.ToString(Convert.ToInt32(Value)) + "%";
         var textX = (int)(this.Width - G.MeasureString(DrawString, Font).Width - 1);
         var textY = (this.Height / 2) - (System.Convert.ToInt32(G.MeasureString(DrawString, Font).Height / 2) - 2);
@@ -876,7 +870,6 @@ public class Ambiance_ProgressBar : Control
             }
         }
 
-        // Draw border
         G.DrawPath(new Pen(Color.FromArgb(180, 180, 180)), GP2);
 
         e.Graphics.DrawImage((Image)B.Clone(), 0, 0);
@@ -986,10 +979,8 @@ public class Ambiance_Toggle : Control
             BackgroundLGB = new LinearGradientBrush(ControlRectangle, Color.FromArgb(208, 208, 208), Color.FromArgb(226, 226, 226), 90.0F);
         }
 
-        // Fill inside background gradient
         G.FillPath(BackgroundLGB, ControlPath);
 
-        // Draw string
         switch (ToggleType)
         {
             case _Type.OnOff:
@@ -1028,10 +1019,8 @@ public class Ambiance_Toggle : Control
         var SwitchPath = RoundRectangle.RoundRect(SwitchRectangle, 4);
         var SwitchButtonLGB = new LinearGradientBrush(SwitchRectangle, Color.FromArgb(253, 253, 253), Color.FromArgb(240, 238, 237), LinearGradientMode.Vertical);
 
-        // Fill switch background gradient
         G.FillPath(SwitchButtonLGB, SwitchPath);
 
-        // Draw borders
         if (_Toggled == true)
         {
             G.DrawPath(new Pen(Color.FromArgb(185, 89, 55)), SwitchPath);
@@ -1053,7 +1042,7 @@ public class Ambiance_ComboBox : ComboBox
     #region Variables
 
     private int _StartIndex = 0;
-    private Color _HoverSelectionColor; // VBConversions Note: Initial value cannot be assigned here since it is non-static.  Assignment has been moved to the class constructors.
+    private Color _HoverSelectionColor;
 
     #endregion Variables
     #region Custom Properties
@@ -1149,18 +1138,14 @@ public class Ambiance_ComboBox : ComboBox
         e.Graphics.Clear(Parent.BackColor);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-        // Create a curvy border
         var GP = RoundRectangle.RoundRect(0, 0, Width - 1, Height - 1, 5);
-        // Fills the body of the rectangle with a gradient
         var LGB = new LinearGradientBrush(ClientRectangle, Color.FromArgb(253, 252, 252), Color.FromArgb(239, 237, 236), 90.0F);
 
         e.Graphics.SetClip(GP);
         e.Graphics.FillRectangle(LGB, ClientRectangle);
         e.Graphics.ResetClip();
 
-        // Draw rectangle border
         e.Graphics.DrawPath(new Pen(Color.FromArgb(180, 180, 180)), GP);
-        // Draw string
         e.Graphics.DrawString(Text, Font, new SolidBrush(Color.FromArgb(76, 76, 97)), new Rectangle(3, 0, Width - 20, Height), new StringFormat
         {
             LineAlignment = StringAlignment.Center,
@@ -1434,9 +1419,9 @@ public class Ambiance_NumericUpDown : Control
         var BackgroundLGB = new LinearGradientBrush(ClientRectangle, Color.FromArgb(246, 246, 246), Color.FromArgb(254, 254, 254), 90.0F);
         G.SmoothingMode = SmoothingMode.AntiAlias;
 
-        G.Clear(Color.Transparent); // Set control background color
-        G.FillPath(BackgroundLGB, Shape); // Draw background
-        G.DrawPath(P1, Shape); // Draw border
+        G.Clear(Color.Transparent);
+        G.FillPath(BackgroundLGB, Shape);
+        G.DrawPath(P1, Shape);
 
         G.DrawString("+", new Font("Tahoma", 14), new SolidBrush(Color.FromArgb(75, 75, 75)), new Rectangle(Width - 25, 1, 19, 30));
         G.DrawLine(new Pen(Color.FromArgb(229, 228, 227)), Width - 28, 1, Width - 28, this.Height - 2);
@@ -1673,14 +1658,14 @@ public class Ambiance_TrackBar : Control
 
         TrackBarHandleRect = new Rectangle(ValueDrawer, 0, 10, 20);
 
-        G.SetClip(PipeBorder); // Set the clipping region of this Graphics to the specified GraphicsPath
+        G.SetClip(PipeBorder);
         G.FillPath(new SolidBrush(Color.FromArgb(221, 221, 221)), PipeBorder);
         FillValue = RoundRectangle.RoundRect(1, 8, TrackBarHandleRect.X + TrackBarHandleRect.Width - 4, 5, 2);
 
-        G.ResetClip(); // Reset the clip region of this Graphics to an infinite region
+        G.ResetClip();
 
         G.SmoothingMode = SmoothingMode.HighQuality;
-        G.DrawPath(new Pen(Color.FromArgb(200, 200, 200)), PipeBorder); // Draw pipe border
+        G.DrawPath(new Pen(Color.FromArgb(200, 200, 200)), PipeBorder);
         G.FillPath(new SolidBrush(Color.FromArgb(217, 99, 50)), FillValue);
 
         G.FillEllipse(new SolidBrush(Color.FromArgb(244, 244, 244)), this.TrackThumb.X + (int)Math.Round(unchecked(TrackThumb.Width * (Value / (double)this.Maximum))) - (int)Math.Round(ThumbSize.Width / 2.0), this.TrackThumb.Y + (int)Math.Round(TrackThumb.Height / 2.0) - (int)Math.Round(ThumbSize.Height / 2.0), this.ThumbSize.Width, this.ThumbSize.Height);
@@ -1815,7 +1800,6 @@ public class Ambiance_TabControl : TabControl
             }
         }
 
-        // Draw container rectangle
         G.FillPath(new SolidBrush(Color.FromArgb(247, 246, 246)), RoundRectangle.RoundRect(0, 23, Width - 1, Height - 24, 2));
         G.DrawPath(new Pen(Color.FromArgb(201, 198, 195)), RoundRectangle.RoundRect(0, 23, Width - 1, Height - 24, 2));
 
@@ -1824,7 +1808,6 @@ public class Ambiance_TabControl : TabControl
             var ItemBoundsRect = GetTabRect(ItemIndex);
             if (ItemIndex == SelectedIndex)
             {
-                // Draw header tabs
                 G.DrawPath(new Pen(Color.FromArgb(201, 198, 195)), RoundRectangle.RoundedTopRect(new Rectangle(new Point(ItemBoundsRect.X - 2, ItemBoundsRect.Y - 2), new Size(ItemBoundsRect.Width + 3, ItemBoundsRect.Height)), 7));
                 G.FillPath(new SolidBrush(Color.FromArgb(247, 246, 246)), RoundRectangle.RoundedTopRect(new Rectangle(new Point(ItemBoundsRect.X - 1, ItemBoundsRect.Y - 1), new Size(ItemBoundsRect.Width + 2, ItemBoundsRect.Height)), 7));
 

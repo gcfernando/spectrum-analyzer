@@ -2,16 +2,10 @@ using System;
 
 namespace Spectrum.Dsp;
 
-/// <summary>
-/// In-place iterative radix-2 complex FFT with precomputed twiddle factors and bit-reversal table.
-/// Convention: X[k] = Σ x[n]·e^(−j·2π·k·n/N), no normalization (scaling is applied by the caller,
-/// see <see cref="BandSpectrumAnalyzer"/>). One instance per transform length. The instance is
-/// immutable after construction; callers own the (re, im) work arrays.
-/// </summary>
+/// <summary>In-place, unnormalized radix-2 FFT with precomputed twiddles; callers own the work arrays.</summary>
 internal sealed class RadixTwoFft
 {
-    // Twiddles stored per stage and contiguously: for a stage of butterfly span 2·h, the factors
-    // e^(−j·2π·k/(2h)), k = 0..h−1, live at index h + k. Total length N (index 0 unused).
+    // Each stage's twiddles occupy indices h through 2h−1, where h is half the butterfly span.
     private readonly double[] _cos;
     private readonly double[] _sin;
     private readonly int[] _swapA;
@@ -46,7 +40,7 @@ internal sealed class RadixTwoFft
             bits++;
         }
 
-        // Only the index pairs that actually swap (i < reverse(i)).
+        // Store only index pairs that need swapping.
         var pairs = 0;
         var reverse = new int[length];
         for (var i = 0; i < length; i++)
@@ -77,7 +71,7 @@ internal sealed class RadixTwoFft
         }
     }
 
-    /// <summary>Forward transform of (re, im) in place. Both arrays must have at least <see cref="Length"/> elements.</summary>
+    /// <summary>Transforms (re, im) in place; both arrays must contain at least <see cref="Length"/> elements.</summary>
     public void Forward(double[] re, double[] im)
     {
         var n = Length;
@@ -90,7 +84,7 @@ internal sealed class RadixTwoFft
             (im[i], im[j]) = (im[j], im[i]);
         }
 
-        // Stage 1 (span 2): twiddle 1.
+        // Handle the span-2 stage directly.
         for (var a = 0; a < n; a += 2)
         {
             var tr = re[a + 1];
@@ -101,7 +95,7 @@ internal sealed class RadixTwoFft
             im[a] += ti;
         }
 
-        // Stage 2 (span 4): twiddles 1 and −j.
+        // Handle the span-4 stage directly.
         for (var a = 0; a < n; a += 4)
         {
             var tr = re[a + 2];
@@ -111,7 +105,7 @@ internal sealed class RadixTwoFft
             re[a] += tr;
             im[a] += ti;
 
-            // (re + j·im)·(−j) = im − j·re
+            // Multiplication by −j maps re + j·im to im − j·re.
             tr = im[a + 3];
             ti = -re[a + 3];
             re[a + 3] = re[a + 1] - tr;

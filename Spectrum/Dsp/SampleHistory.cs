@@ -4,14 +4,7 @@ using System.Threading;
 
 namespace Spectrum.Dsp;
 
-/// <summary>
-/// Single-producer / single-consumer history of the most recent interleaved float frames.
-///
-/// The producer (audio callback) never blocks, never allocates and never waits for the consumer:
-/// it copies into a fixed ring and then advances a published frame counter. The consumer copies the
-/// latest frames out and validates afterwards that the producer did not overwrite the region during
-/// the copy (seqlock-style); a torn snapshot is retried rather than published.
-/// </summary>
+/// <summary>A lock-free single-producer/single-consumer ring for recent interleaved audio frames.</summary>
 internal sealed class SampleHistory
 {
     private const int MaxSnapshotAttempts = 4;
@@ -19,11 +12,10 @@ internal sealed class SampleHistory
     private readonly float[] _ring;
     private readonly int _capacityFrames;
 
-    // Frames fully written and visible to the consumer. 64-bit counters are only accessed through Interlocked,
-    // which is atomic (and a full fence) in 32-bit processes too; the application runs as a 32-bit process.
+    // Number of fully written frames visible to the consumer.
     private long _committedFrames;
 
-    // Upper bound of frames the producer may currently be writing (set before the copy starts).
+    // Exclusive upper bound of frames the producer may currently be writing.
     private long _reservedFrames;
 
     public SampleHistory(int channels, int capacityFrames)
@@ -46,10 +38,10 @@ internal sealed class SampleHistory
     public int Channels { get; }
     public int CapacityFrames => _capacityFrames;
 
-    /// <summary>Total frames ever committed. Monotonic; used to detect a stalled stream.</summary>
+    /// <summary>Total committed frames, used to detect a stalled stream.</summary>
     public long TotalFrames => Interlocked.Read(ref _committedFrames);
 
-    /// <summary>Producer: append <paramref name="byteLength"/> bytes of interleaved 32-bit float samples.</summary>
+    /// <summary>Appends interleaved 32-bit float samples from an unmanaged buffer.</summary>
     public void Write(IntPtr buffer, int byteLength)
     {
         if (buffer == IntPtr.Zero || byteLength <= 0)
@@ -67,13 +59,13 @@ internal sealed class SampleHistory
         var sourceOffsetSamples = 0;
         if (frames > _capacityFrames)
         {
-            // Only the tail can survive; skip what would be overwritten immediately.
+            // Skip samples that would be overwritten immediately.
             sourceOffsetSamples = (frames - _capacityFrames) * Channels;
             frames = _capacityFrames;
         }
 
-        var committed = Interlocked.Read(ref _committedFrames); // producer is the only writer
-        Interlocked.Exchange(ref _reservedFrames, committed + frames); // full fence: reservation visible before any sample is overwritten
+        var committed = Interlocked.Read(ref _committedFrames); // The producer is the only writer.
+        Interlocked.Exchange(ref _reservedFrames, committed + frames); // Publish the reservation before overwriting samples.
 
         var ringFrame = (int)(committed % _capacityFrames);
         var firstFrames = Math.Min(frames, _capacityFrames - ringFrame);
@@ -85,10 +77,10 @@ internal sealed class SampleHistory
             Marshal.Copy(IntPtr.Add(src, firstFrames * Channels * sizeof(float)), _ring, 0, (frames - firstFrames) * Channels);
         }
 
-        Interlocked.Exchange(ref _committedFrames, committed + frames); // full fence: samples visible before the new count
+        Interlocked.Exchange(ref _committedFrames, committed + frames); // Publish samples before advancing the committed count.
     }
 
-    /// <summary>Producer (tests / managed sources): append interleaved samples from an array.</summary>
+    /// <summary>Appends interleaved samples from a managed array.</summary>
     public void Write(float[] interleaved, int frameCount)
     {
         var handle = GCHandle.Alloc(interleaved, GCHandleType.Pinned);
@@ -102,14 +94,7 @@ internal sealed class SampleHistory
         }
     }
 
-    /// <summary>
-    /// Consumer: copy the latest <paramref name="frames"/> frames into <paramref name="destination"/> (oldest first).
-    /// If fewer frames have ever been written, the missing oldest part is zero-filled (silence).
-    /// Frames with an absolute index below <paramref name="discardBeforeFrame"/> are also zero-filled: after a gap in
-    /// the stream (e.g. loopback delivered nothing while playback was paused) audio from before the gap must not be
-    /// analysed as if it were contiguous with the new audio.
-    /// Returns false if a consistent snapshot could not be obtained (producer lapped the reader).
-    /// </summary>
+    /// <summary>Copies the latest frames oldest-first, zero-filling missing or discarded frames; returns false if overwritten during the copy.</summary>
     public bool TryCopyLatest(float[] destination, int frames, out long endFrame, long discardBeforeFrame = 0)
     {
         if (frames < 1 || frames > _capacityFrames)
@@ -143,11 +128,10 @@ internal sealed class SampleHistory
                 Array.Copy(_ring, 0, destination, (missing + firstFrames) * Channels, (available - firstFrames) * Channels);
             }
 
-            Interlocked.MemoryBarrier(); // sample reads complete before the validation read
+            Interlocked.MemoryBarrier(); // Complete sample reads before checking for overwritten data.
             var reserved = Interlocked.Read(ref _reservedFrames);
 
-            // Any frame the producer may have touched is < reserved; it overwrote our region iff it reached
-            // startFrame + capacity.
+            // The snapshot is safe if the producer has not advanced beyond its end plus ring capacity.
             if (reserved - startFrame <= _capacityFrames)
             {
                 endFrame = end;

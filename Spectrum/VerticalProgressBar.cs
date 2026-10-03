@@ -40,16 +40,13 @@ public sealed class VerticalProgressBar : ProgressBar
     private VisualizationMode _lastModeQ = (VisualizationMode)(-1);
 
     private readonly List<Rectangle> _brickRects = new(256);
-    private readonly List<int> _brickCentres = new(256); // y of each brick centre, bottom brick first
+    private readonly List<int> _brickCentres = new(256);
     private readonly List<float> _brickT = new(256);
     private readonly List<Color> _brickHeatColors = new(256);
 
     private int _cachedWidth = -1;
 
-    // Lit bricks for the stacked modes, kept with hysteresis so a level hovering at a brick boundary does not make
-    // the top brick flicker. A brick turns on when the level is BrickHysteresisPx above its centre and off when it is
-    // more than BrickHysteresisPx below it (2 px of a 300 px bar ≈ 0.5 dB; steady-level display error ≤ ±1.44 dB
-    // instead of ±0.96 dB). Measured on 11 real songs at 64 fps: treble flicker −42 %, no added onset latency.
+    // Hysteresis keeps the top brick steady near boundaries; bricks switch on and off 2 px from their centers.
     private const int BrickHysteresisPx = 2;
     private int _litBricks;
     private bool _litBricksValid;
@@ -84,7 +81,8 @@ public sealed class VerticalProgressBar : ProgressBar
         Wave,
         Pulse,
         Glow,
-        Spectrum
+        Spectrum,
+        Lollipop
     }
 
     private object _cachedTagObject;
@@ -122,6 +120,7 @@ public sealed class VerticalProgressBar : ProgressBar
             "pulse"           => VisualizationMode.Pulse,
             "glow"            => VisualizationMode.Glow,
             "spectrum"        => VisualizationMode.Spectrum,
+            "lollipop"        => VisualizationMode.Lollipop,
             _                 => VisualizationMode.Bricks,
         };
     }
@@ -253,15 +252,11 @@ public sealed class VerticalProgressBar : ProgressBar
     [Category("Peak Hold")]
     public Color PeakLineColor { get; set; } = Color.FromArgb(255, 255, 255);
 
-    // When enabled, the peak marker is tinted to match the heat color at its own height instead of a fixed
-    // color, so the marker reads as "this band's loudest recent moment" rather than a generic indicator.
+    // Match the peak marker to the heat-map color at the peak's height.
     [Category("Peak Hold")]
     public bool PeakColorMatchesHeat { get; set; } = true;
 
-    // Reference-scale tick lines (e.g. dB landmarks), normalized 0 (bottom/Minimum) .. 1 (top/Maximum), shared
-    // by every bar so they align across the whole meter regardless of each bar's own animated level. Drawn
-    // under the fill, so they only show through the unlit portion above the current level - like the printed
-    // scale on a hardware VU meter.
+    // Shared normalized reference ticks align across bars and show through only above the fill.
     [Category("Appearance")]
     public IReadOnlyList<float> GridlineLevels { get; set; }
 
@@ -436,7 +431,7 @@ public sealed class VerticalProgressBar : ProgressBar
         var filledH = (int)Math.Round(innerH * fillPercent);
 
         var mode = GetVisualizationModeCached();
-        UpdateLitBricks(bounds, bottomInner, innerH, filledH); // idempotent for an unchanged level
+        UpdateLitBricks(bounds, bottomInner, innerH, filledH);
 
         switch (mode)
         {
@@ -461,12 +456,15 @@ public sealed class VerticalProgressBar : ProgressBar
             case VisualizationMode.Glow:
                 DrawMode_Glow(e.Graphics, innerX, innerW, topInner, bottomInner, filledH, fillPercent);
                 break;
+            case VisualizationMode.Lollipop:
+                DrawMode_Lollipop(e.Graphics, innerX, innerW, topInner, bottomInner, innerH, fillPercent);
+                break;
             default:
                 DrawMode_Spectrum(e.Graphics, bounds);
                 break;
         }
 
-        // No marker while the peak sits at the floor: in silence a line at the bottom of every bar is noise, not data.
+        // Hide the peak marker at the floor to avoid a row of markers during silence.
         if (PeakHoldEnabled && ModeHasPeakMarker(mode) && _peakValue > Minimum + 0.5f)
         {
             var peakPercent = Clamp01((Clamp(_peakValue, Minimum, Maximum) - Minimum) / range);
@@ -474,6 +472,8 @@ public sealed class VerticalProgressBar : ProgressBar
 
             if (mode == VisualizationMode.Dots)
                 DrawPeakMarker_Dot(e.Graphics, bounds, innerX, innerW, topInner, bottomInner, innerH, range);
+            else if (mode == VisualizationMode.Lollipop)
+                DrawPeakMarker_Lollipop(e.Graphics, innerX, innerW, topInner, bottomInner, innerH, range);
             else
                 DrawPeakMarker_Line(e.Graphics, innerX, innerW, topInner, bottomInner, innerH, range);
         }
@@ -744,8 +744,7 @@ public sealed class VerticalProgressBar : ProgressBar
         if (fillHeight <= 0)
             return;
 
-        // Layer translucent bands inside this control's clip to create a contained halo around a bright core.
-        // Reusing the brushes keeps the paint path allocation-free; the level color follows the active theme.
+        // Layer translucent bands inside the control to create a themed halo around the bright core.
         var color = GetLevelColor(fillPercent);
         _glowOuterBrush.Color = Color.FromArgb(30, color);
         _glowMiddleBrush.Color = Color.FromArgb(90, color);
@@ -760,6 +759,26 @@ public sealed class VerticalProgressBar : ProgressBar
             g.FillRectangle(_glowCoreBrush, innerX + 2, fillTop, innerW - 4, fillHeight);
         else
             g.FillRectangle(_glowCoreBrush, innerX, fillTop, innerW, fillHeight);
+    }
+
+    private void DrawMode_Lollipop(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH, float fillPercent)
+    {
+        var levelY = bottomInner - (int)Math.Round(innerH * fillPercent);
+        levelY = Clamp(levelY, topInner, bottomInner);
+        var centerX = innerX + (innerW / 2);
+        var stemWidth = Math.Min(innerW, 2);
+        var stemX = centerX - (stemWidth / 2);
+        var color = GetLevelColor(fillPercent);
+
+        _workBrush.Color = Color.FromArgb(110, color);
+        g.FillRectangle(_workBrush, stemX, levelY, stemWidth, Math.Max(1, bottomInner - levelY + 1));
+
+        _workBrush.Color = color;
+        var markerSize = Math.Min(Math.Min(innerW, innerH + 1), 9);
+        markerSize = Math.Max(1, markerSize);
+        var markerX = centerX - (markerSize / 2);
+        var markerY = Clamp(levelY - (markerSize / 2), topInner, bottomInner - markerSize + 1);
+        g.FillEllipse(_workBrush, markerX, markerY, markerSize, markerSize);
     }
 
     private void DrawMode_Spectrum(Graphics g, Rectangle bounds)
@@ -806,8 +825,7 @@ public sealed class VerticalProgressBar : ProgressBar
         }
     }
 
-    // Heat-matched peak color: the fill color at the peak's own height, lightened for contrast against the
-    // (same-colored) fill sitting just below it.
+    // Lighten the peak-height fill color so the marker stands out against the fill below it.
     private Color GetPeakColor(float peakPercent)
     {
         if (!PeakColorMatchesHeat) return PeakLineColor;
@@ -851,6 +869,20 @@ public sealed class VerticalProgressBar : ProgressBar
         g.FillEllipse(_peakBrush, x, y, dotSize, dotSize);
     }
 
+    private void DrawPeakMarker_Lollipop(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH, float range)
+    {
+        var pv = Clamp(_peakValue, Minimum, Maximum);
+        var peakPercent = Clamp01((pv - Minimum) / range);
+        var peakY = bottomInner - (int)Math.Round(innerH * peakPercent);
+        peakY = Clamp(peakY, topInner, bottomInner);
+
+        var tickWidth = Math.Min(innerW, 8);
+        var tickHeight = Math.Min(innerH + 1, Math.Max(1, PeakLineThickness));
+        var tickX = innerX + ((innerW - tickWidth) / 2);
+        var tickY = Clamp(peakY - (tickHeight / 2), topInner, bottomInner - tickHeight + 1);
+        g.FillRectangle(_peakBrush, tickX, tickY, tickWidth, tickHeight);
+    }
+
     private void EnsureBrickGeometry(Rectangle bounds)
     {
         if (bounds.Width == _cachedWidth && bounds.Height == _cachedHeight)
@@ -858,7 +890,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
         _cachedWidth = bounds.Width;
         _cachedHeight = bounds.Height;
-        _litBricksValid = false; // new geometry: start from the plain centre rule
+        _litBricksValid = false; // Reset hysteresis when the bar geometry changes.
 
         _brickRects.Clear();
         _brickCentres.Clear();
@@ -886,7 +918,7 @@ public sealed class VerticalProgressBar : ProgressBar
             _brickCentres.Add(rect.Top + (rect.Height / 2));
 
             var centerY = rect.Top + (rect.Height * 0.5f);
-            var t = (bottom - centerY) / innerH; // 0 bottom -> 1 top
+            var t = (bottom - centerY) / innerH; // 0 at the bottom, 1 at the top.
             _brickT.Add(Clamp01(t));
 
             y -= brickHeight + gap;
@@ -938,9 +970,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private Color GetLevelColor(float level01)
     {
-        // Apply the same intensity-curve remap RebuildBrickHeatColors uses for the bar fill, so a color
-        // requested for a given height (peak marker, Wave fill/line) matches what the heat-map actually
-        // renders at that same height instead of the plain linear position.
+        // Use the fill's intensity curve so markers and Wave colors match the heat-map at the same height.
         var t = level01;
         if (HeatmapEnabled)
         {
@@ -962,8 +992,7 @@ public sealed class VerticalProgressBar : ProgressBar
         return c;
     }
 
-    // Lit-brick count with hysteresis around each brick centre (bricks are ordered bottom-up). Applying it twice to the
-    // same level gives the same result, so calling it from both the animation tick and OnPaint is safe.
+    // Bricks are ordered bottom-up; this update is safe from both the animation tick and OnPaint.
     private void UpdateLitBricks(Rectangle bounds, int bottomInner, int innerH, int filledH)
     {
         EnsureBrickGeometry(bounds);
@@ -971,11 +1000,11 @@ public sealed class VerticalProgressBar : ProgressBar
 
         _litBricks = _litBricksValid
             ? BarBallistics.StepLitBricks(_litBricks, _brickCentres, topLimit, BrickHysteresisPx)
-            : BarBallistics.StepLitBricks(0, _brickCentres, topLimit, 0); // new geometry: plain centre rule
+            : BarBallistics.StepLitBricks(0, _brickCentres, topLimit, 0);
         _litBricksValid = true;
     }
 
-    // Bar at its target and peak marker neither holding nor falling: further ticks would change nothing.
+    // Stop ticking when the bar and peak are settled.
     private bool IsSettled()
         => _displayValue == _targetValue && _peakHoldLeftMs <= 0f && _peakValue <= _displayValue;
 
@@ -1020,16 +1049,14 @@ public sealed class VerticalProgressBar : ProgressBar
             return;
         }
 
-        // PeakDecayPerTick is expressed per 1/60 s; convert to a rate so the fall is refresh-rate independent.
+        // Convert the per-60-Hz peak decay to a rate so it is refresh-rate independent.
         var decayPerSecond = Math.Max(0.01f, PeakDecayPerTick) * 60f;
 
         BarBallistics.StepPeak(
             ref _peakValue, ref _peakHoldLeftMs, _displayValue, intervalMs, PeakHoldMilliseconds, decayPerSecond, Minimum);
     }
 
-    // Repaint only when something OnPaint draws would change. The key is derived with the same arithmetic as OnPaint
-    // (lit-brick count, fill height in pixels, peak-marker row), so skipping an Invalidate never leaves a stale pixel.
-    // Quantizing the level to 1/1024 instead repainted bars on changes smaller than one brick (~1.9 dB).
+    // Repaint only when the painted state changes; 1/1024 level quantization avoids sub-brick repaints.
     private bool ComputeShouldInvalidate(VisualizationMode mode)
     {
         var dq = ComputeRenderKey(mode, out var pq, out var filledH);
@@ -1072,17 +1099,22 @@ public sealed class VerticalProgressBar : ProgressBar
         if (PeakHoldEnabled && ModeHasPeakMarker(mode) && _peakValue > Minimum + 0.5f)
         {
             var peakPercent = Clamp01((Clamp(_peakValue, Minimum, Maximum) - Minimum) / range);
-            peakKey = (int)Math.Round(innerH * peakPercent);
+            peakKey = mode == VisualizationMode.Lollipop
+                ? (int)Math.Round(peakPercent * 1024f)
+                : (int)Math.Round(innerH * peakPercent);
         }
 
         switch (mode)
         {
+            case VisualizationMode.Lollipop:
+                // Heat-colored markers can change between pixel rows.
+                return (int)Math.Round(fillPercent * 1024f);
+
             case VisualizationMode.Bricks:
             case VisualizationMode.Dots:
             case VisualizationMode.Pulse:
             case VisualizationMode.Spectrum:
             {
-                // Same state the Draw methods use.
                 UpdateLitBricks(bounds, bottomInner, innerH, filledH);
                 return _litBricks;
             }
@@ -1142,10 +1174,7 @@ public sealed class VerticalProgressBar : ProgressBar
         }
 
         var fps = Math.Max(15, AnimationFps);
-        // WinForms timers fire on the ~15.6 ms Windows timer tick and round a requested interval UP to whole ticks:
-        // 17 ms (60 fps rounded) measured 31.2 ms (32 fps), and 16 ms alternated 15.4/31.6 ms (judder). Requesting just
-        // under the frame period lands on the tick at or above the target rate (15 ms measured a steady 15.7 ms, 64 fps).
-        // Ballistics use elapsed time, so a higher tick rate only makes motion smoother; timing is unchanged.
+        // Request just under the frame period because WinForms rounds timer intervals up to the next system tick.
         var interval = Math.Max(4, (int)Math.Floor(1000.0 / fps) - 1);
 
         if (s_timer.Interval != interval)
@@ -1193,9 +1222,7 @@ public sealed class VerticalProgressBar : ProgressBar
                 }
             }
 
-            // Sleep only when nothing is moving. "No repaint" alone is not enough: a peak hold or a slow release can go
-            // several ticks without a visible change, and stopping then restarts with a guessed 1/60 s step, which
-            // loses time and makes the motion stutter.
+            // Keep ticking while ballistics move, even if no frame changes, to preserve elapsed-time accuracy.
             if (!anyInvalidated && !anyAnimating)
             {
                 s_idleTicks++;
@@ -1227,7 +1254,7 @@ public sealed class VerticalProgressBar : ProgressBar
         get
         {
             var cp = base.CreateParams;
-            cp.Style |= 0x04; // PBS_VERTICAL
+            cp.Style |= 0x04;
             return cp;
         }
     }

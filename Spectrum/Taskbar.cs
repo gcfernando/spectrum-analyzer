@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace Spectrum
 {
-    // Developed by Gehan Fernando
+    // Developed by Gehan Fernando.
 
     public static class Taskbar
     {
