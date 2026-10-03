@@ -25,50 +25,50 @@ internal static class BarColorThemes
 {
     // A gentler curve smooths the green-to-yellow-to-orange transition.
     public static readonly BarColorTheme ClassicSmooth = new(
-        low: Color.FromArgb(0, 230, 90),
-        mid: Color.FromArgb(255, 220, 0),
-        high: Color.FromArgb(255, 110, 0),
-        peak: Color.Red,
+        low: Color.FromArgb(31, 190, 112),
+        mid: Color.FromArgb(222, 190, 82),
+        high: Color.FromArgb(232, 112, 67),
+        peak: Color.FromArgb(255, 206, 168),
         intensityCurve: 1.5f);
 
     // Cool gradient from deep blue through cyan to near-white.
     public static readonly BarColorTheme Ice = new(
-        low: Color.FromArgb(20, 70, 200),
-        mid: Color.FromArgb(0, 200, 230),
-        high: Color.FromArgb(180, 245, 255),
-        peak: Color.White,
+        low: Color.FromArgb(48, 91, 190),
+        mid: Color.FromArgb(30, 175, 205),
+        high: Color.FromArgb(140, 222, 242),
+        peak: Color.FromArgb(224, 246, 255),
         intensityCurve: 1.5f);
 
     // Warm amber and orange tones echo the title-bar accent.
     public static readonly BarColorTheme Sunset = new(
-        low: Color.FromArgb(140, 70, 10),
-        mid: Color.FromArgb(230, 120, 20),
-        high: Color.FromArgb(255, 60, 30),
-        peak: Color.FromArgb(255, 230, 160),
+        low: Color.FromArgb(145, 79, 35),
+        mid: Color.FromArgb(222, 126, 50),
+        high: Color.FromArgb(238, 83, 57),
+        peak: Color.FromArgb(255, 218, 170),
         intensityCurve: 1.5f);
 
     // Cyan intensity ramp from dim to bright.
     public static readonly BarColorTheme MonoCyan = new(
-        low: Color.FromArgb(10, 60, 70),
-        mid: Color.FromArgb(0, 160, 190),
-        high: Color.FromArgb(0, 230, 255),
-        peak: Color.FromArgb(220, 255, 255),
+        low: Color.FromArgb(24, 94, 112),
+        mid: Color.FromArgb(20, 157, 181),
+        high: Color.FromArgb(67, 207, 220),
+        peak: Color.FromArgb(206, 248, 247),
         intensityCurve: 1.4f);
 
     // Retro gradient from purple through magenta to cyan.
     public static readonly BarColorTheme Synthwave = new(
-        low: Color.FromArgb(60, 20, 120),
-        mid: Color.FromArgb(200, 30, 160),
-        high: Color.FromArgb(255, 80, 200),
-        peak: Color.FromArgb(120, 230, 255),
+        low: Color.FromArgb(92, 55, 155),
+        mid: Color.FromArgb(180, 65, 163),
+        high: Color.FromArgb(232, 105, 190),
+        peak: Color.FromArgb(148, 221, 250),
         intensityCurve: 1.5f);
 
     // Aurora-inspired gradient from emerald through cyan to pale lavender.
     public static readonly BarColorTheme Aurora = new(
-        low: Color.FromArgb(20, 110, 70),
-        mid: Color.FromArgb(0, 190, 155),
-        high: Color.FromArgb(70, 220, 235),
-        peak: Color.FromArgb(220, 200, 255),
+        low: Color.FromArgb(34, 126, 91),
+        mid: Color.FromArgb(28, 174, 151),
+        high: Color.FromArgb(91, 199, 205),
+        peak: Color.FromArgb(206, 213, 244),
         intensityCurve: 1.5f);
 
     public static BarColorTheme Resolve(string name) => (name ?? string.Empty).Trim().ToLowerInvariant() switch

@@ -41,10 +41,13 @@ public sealed class AdvancedVisualizationControl : Control
     private readonly byte[] _noteLevels = new byte[12 * NoteOctaveCount];
     private readonly PointF[] _plotPoints = new PointF[BandCount];
     private readonly SolidBrush[] _levelBrushes = new SolidBrush[256];
-    private readonly Pen _gridPen = new Pen(Color.FromArgb(52, 255, 255, 255), 1f);
+    private readonly Pen _gridPen = new Pen(Color.FromArgb(42, 201, 215, 230), 1f);
+    private readonly Pen _majorGridPen = new Pen(Color.FromArgb(25, 213, 224, 238), 1f);
     private readonly Pen _linePen = new Pen(Color.White, 1.5f);
-    private readonly SolidBrush _contourFillBrush = new SolidBrush(Color.FromArgb(72, 0, 230, 90));
-    private readonly SolidBrush _textBrush = new SolidBrush(Color.White);
+    private readonly Pen _softLinePen = new Pen(Color.FromArgb(52, Color.White), 5f);
+    private readonly Pen _framePen = new Pen(Color.FromArgb(64, 183, 199, 216), 1f);
+    private readonly SolidBrush _contourFillBrush = new SolidBrush(Color.FromArgb(84, 0, 230, 90));
+    private readonly SolidBrush _textBrush = new SolidBrush(Color.FromArgb(201, 216, 230));
     private readonly GraphicsPath _contourPath = new GraphicsPath();
     private readonly StringFormat _centeredText = new StringFormat
     {
@@ -236,6 +239,7 @@ public sealed class AdvancedVisualizationControl : Control
         {
             graphics.SetClip(ClientRectangle);
             graphics.Clear(BackColor);
+            graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
             var width = ClientSize.Width;
             var height = ClientSize.Height;
@@ -259,6 +263,11 @@ public sealed class AdvancedVisualizationControl : Control
                     PaintNoteMap(graphics, width, height);
                     break;
             }
+
+            if (width > 2 && height > 2)
+            {
+                graphics.DrawRectangle(_framePen, 0, 0, width - 1, height - 1);
+            }
         }
         finally
         {
@@ -276,7 +285,10 @@ public sealed class AdvancedVisualizationControl : Control
             }
 
             _gridPen.Dispose();
+            _majorGridPen.Dispose();
             _linePen.Dispose();
+            _softLinePen.Dispose();
+            _framePen.Dispose();
             _contourFillBrush.Dispose();
             _textBrush.Dispose();
             _contourPath.Dispose();
@@ -319,6 +331,19 @@ public sealed class AdvancedVisualizationControl : Control
                     x, y, cellWidth + 1f, rowHeight + 1f);
             }
         }
+
+        for (var band = 10; band < BandCount; band += 10)
+        {
+            var x = (band * width) / BandCount;
+            graphics.DrawLine(_majorGridPen, x, 0, x, height);
+        }
+
+        var rowStep = Math.Max(1, rows / 8);
+        for (var row = rowStep; row < rows; row += rowStep)
+        {
+            var y = height - (int)Math.Round(row * rowHeight);
+            graphics.DrawLine(_majorGridPen, 0, y, width, y);
+        }
     }
 
     private void PaintRadialSpectrum(Graphics graphics, int width, int height)
@@ -339,6 +364,18 @@ public sealed class AdvancedVisualizationControl : Control
             graphics.DrawEllipse(_gridPen, centerX - radius, centerY - radius, radius * 2f, radius * 2f);
             graphics.DrawEllipse(_gridPen, centerX - (radius * 0.67f), centerY - (radius * 0.67f),
                 radius * 1.34f, radius * 1.34f);
+            graphics.DrawEllipse(_majorGridPen, centerX - (radius * 0.42f), centerY - (radius * 0.42f),
+                radius * 0.84f, radius * 0.84f);
+
+            for (var band = 0; band < BandCount; band += 10)
+            {
+                var guideAngle = ((Math.PI * 2.0 * band) / BandCount) - (Math.PI / 2.0);
+                graphics.DrawLine(_majorGridPen,
+                    centerX + ((float)Math.Cos(guideAngle) * innerRadius),
+                    centerY + ((float)Math.Sin(guideAngle) * innerRadius),
+                    centerX + ((float)Math.Cos(guideAngle) * radius),
+                    centerY + ((float)Math.Sin(guideAngle) * radius));
+            }
 
             for (var band = 0; band < BandCount; band++)
             {
@@ -376,6 +413,18 @@ public sealed class AdvancedVisualizationControl : Control
             var top = Math.Max(2f, height * 0.06f);
             var baseline = Math.Max(top + 1f, height - Math.Max(2f, height * 0.08f));
             var plotHeight = Math.Max(1f, baseline - top);
+            for (var guide = 1; guide <= 3; guide++)
+            {
+                var y = baseline - (plotHeight * guide / 4f);
+                graphics.DrawLine(_majorGridPen, 0, y, width, y);
+            }
+
+            for (var band = 20; band < BandCount; band += 20)
+            {
+                var x = (float)band * (width - 1f) / (BandCount - 1);
+                graphics.DrawLine(_majorGridPen, x, top, x, baseline);
+            }
+
             for (var band = 0; band < BandCount; band++)
             {
                 var x = (float)band * (width - 1f) / (BandCount - 1);
@@ -397,6 +446,8 @@ public sealed class AdvancedVisualizationControl : Control
             _linePen.Color = _levelBrushes[220].Color;
             _contourPath.Reset();
             _contourPath.AddCurve(_plotPoints, 0, BandCount - 1, 0.25f);
+            _softLinePen.Color = Color.FromArgb(48, _linePen.Color);
+            graphics.DrawPath(_softLinePen, _contourPath);
             graphics.DrawPath(_linePen, _contourPath);
             graphics.DrawLine(_gridPen, 0, baseline, width, baseline);
         }
@@ -440,7 +491,7 @@ public sealed class AdvancedVisualizationControl : Control
                 var y = topMargin + (pitch * cellHeight);
                 graphics.FillRectangle(_levelBrushes[_noteLevels[(octave * 12) + pitch]],
                     x, y, cellWidth, cellHeight);
-                graphics.DrawRectangle(_gridPen, x, y, cellWidth, cellHeight);
+                graphics.DrawRectangle(_majorGridPen, x, y, cellWidth, cellHeight);
 
                 var pitchBounds = new RectangleF(0, y, leftMargin - 2f, cellHeight);
                 graphics.DrawString(s_pitchNames[pitch], Font, _textBrush, pitchBounds, _centeredText);

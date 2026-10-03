@@ -203,7 +203,7 @@ public partial class FormAudioSpectrum : Form
             Margin = new Padding(0, 0, 0, 0)
         };
 
-        _modeSelector = CreateSelector("modeSelector", 98, s_visualModes);
+        _modeSelector = CreateSelector("modeSelector", 98, s_visualModes, false);
         _modeSelector.AccessibleName = "Visualization mode";
         _modeSelector.AccessibleDescription = "Press Ctrl+M to cycle visualization modes";
         _modeSelector.TabIndex = 0;
@@ -219,7 +219,7 @@ public partial class FormAudioSpectrum : Form
             Margin = new Padding(7, 0, 0, 0)
         };
 
-        _themeSelector = CreateSelector("themeSelector", 140, s_colorThemes);
+        _themeSelector = CreateSelector("themeSelector", 140, s_colorThemes, true);
         _themeSelector.AccessibleName = "Bar color theme";
         _themeSelector.AccessibleDescription = "Press Ctrl+T to cycle bar color themes";
         _themeSelector.TabIndex = 1;
@@ -254,24 +254,181 @@ public partial class FormAudioSpectrum : Form
         ambiance_ThemeSpectrum.SizeChanged += (s, e) => PositionSelectionPanel();
     }
 
-    private ComboBox CreateSelector(string name, int width, string[] choices)
+    private ComboBox CreateSelector(string name, int width, string[] choices, bool isThemeSelector)
     {
         var selector = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
+            DrawMode = DrawMode.OwnerDrawFixed,
             FlatStyle = FlatStyle.Flat,
             BackColor = Color.FromArgb(38, 35, 29),
             ForeColor = Color.FromArgb(235, 232, 225),
             Font = ambiance_ThemeSpectrum.Font,
             Name = name,
             Size = new Size(width, 24),
+            ItemHeight = 22,
             Margin = new Padding(0, 0, 0, 0),
             IntegralHeight = true,
             MaxDropDownItems = 10
         };
         foreach (var choice in choices)
             selector.Items.Add(choice);
+        selector.DrawItem += (sender, args) => DrawSelectorItem(args, isThemeSelector);
         return selector;
+    }
+
+    private void DrawSelectorItem(DrawItemEventArgs e, bool isThemeSelector)
+    {
+        if (e.Index < 0)
+            return;
+
+        var selected = (e.State & DrawItemState.Selected) != 0;
+        var background = selected ? Color.FromArgb(57, 68, 82) : Color.FromArgb(31, 33, 38);
+        using var backgroundBrush = new SolidBrush(background);
+        e.Graphics.FillRectangle(backgroundBrush, e.Bounds);
+
+        var choice = (string)(isThemeSelector ? _themeSelector.Items[e.Index] : _modeSelector.Items[e.Index]);
+        var textLeft = e.Bounds.Left + 8;
+        if (isThemeSelector)
+        {
+            var theme = BarColorThemes.Resolve(choice);
+            var swatch = new Rectangle(e.Bounds.Left + 7, e.Bounds.Top + 6, 30, Math.Max(4, e.Bounds.Height - 12));
+            using var lowBrush = new SolidBrush(theme.Low);
+            using var midBrush = new SolidBrush(theme.Mid);
+            using var highBrush = new SolidBrush(theme.High);
+            using var swatchPen = new Pen(Color.FromArgb(90, 226, 235, 244));
+            e.Graphics.FillRectangle(lowBrush, swatch.Left, swatch.Top, 10, swatch.Height);
+            e.Graphics.FillRectangle(midBrush, swatch.Left + 10, swatch.Top, 10, swatch.Height);
+            e.Graphics.FillRectangle(highBrush, swatch.Left + 20, swatch.Top, 10, swatch.Height);
+            e.Graphics.DrawRectangle(swatchPen, swatch);
+            textLeft = swatch.Right + 8;
+        }
+        else
+        {
+            var theme = BarColorThemes.Resolve(_barTheme);
+            DrawModeIcon(e.Graphics, choice, new Rectangle(e.Bounds.Left + 7, e.Bounds.Top + 4, 20, 14), theme.High);
+            textLeft = e.Bounds.Left + 34;
+        }
+
+        TextRenderer.DrawText(e.Graphics, choice, _modeSelector.Font,
+            new Rectangle(textLeft, e.Bounds.Top, Math.Max(0, e.Bounds.Right - textLeft - 4), e.Bounds.Height),
+            Color.FromArgb(235, 238, 243), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        if (selected && e.Bounds.Width > 0 && e.Bounds.Height > 0)
+        {
+            using var selectionPen = new Pen(Color.FromArgb(80, 143, 185, 201));
+            e.Graphics.DrawRectangle(selectionPen, e.Bounds.Left, e.Bounds.Top,
+                e.Bounds.Width - 1, e.Bounds.Height - 1);
+        }
+    }
+
+    private static void DrawModeIcon(Graphics graphics, string mode, Rectangle bounds, Color color)
+    {
+        using var pen = new Pen(color, 1.6f);
+        using var brush = new SolidBrush(color);
+        var centerY = bounds.Top + (bounds.Height / 2);
+
+        switch (mode)
+        {
+            case "Spectrum":
+                DrawBars(graphics, brush, bounds, new[] { 5, 10, 7, 13, 9 });
+                break;
+            case "Bricks":
+                for (var row = 0; row < 3; row++)
+                    for (var column = 0; column < 3; column++)
+                        graphics.FillRectangle(brush, bounds.Left + (column * 6), bounds.Top + 1 + (row * 4), 4, 2);
+                break;
+            case "LED":
+                for (var row = 0; row < 3; row++)
+                    for (var column = 0; column < 3; column++)
+                        graphics.FillEllipse(brush, bounds.Left + (column * 6), bounds.Top + 1 + (row * 4), 3, 3);
+                break;
+            case "Dots":
+                for (var i = 0; i < 4; i++)
+                    graphics.FillEllipse(brush, bounds.Left + 2 + (i * 5), centerY - ((i % 2) * 4), 3, 3);
+                break;
+            case "Wave":
+                graphics.DrawLines(pen, new[]
+                {
+                    new Point(bounds.Left, centerY), new Point(bounds.Left + 4, centerY - 4),
+                    new Point(bounds.Left + 8, centerY), new Point(bounds.Left + 12, centerY + 4),
+                    new Point(bounds.Right - 1, centerY)
+                });
+                break;
+            case "Pulse":
+                graphics.DrawLines(pen, new[]
+                {
+                    new Point(bounds.Left, centerY), new Point(bounds.Left + 5, centerY),
+                    new Point(bounds.Left + 8, bounds.Top + 1), new Point(bounds.Left + 11, bounds.Bottom - 1),
+                    new Point(bounds.Left + 14, centerY), new Point(bounds.Right - 1, centerY)
+                });
+                break;
+            case "Center":
+                for (var i = 0; i < 4; i++)
+                    graphics.DrawLine(pen, bounds.Left + 2 + (i * 5), centerY - 1, bounds.Left + 2 + (i * 5), centerY + 2);
+                break;
+            case "Mirror":
+                for (var i = 0; i < 4; i++)
+                {
+                    var x = bounds.Left + 2 + (i * 5);
+                    graphics.DrawLine(pen, x, centerY - 1, x, bounds.Top + 1);
+                    graphics.DrawLine(pen, x, centerY + 1, x, bounds.Bottom - 1);
+                }
+                break;
+            case "Glow":
+                using (var glowPen = new Pen(Color.FromArgb(90, color), 4f))
+                    graphics.DrawEllipse(glowPen, bounds.Left + 4, bounds.Top + 1, 11, 11);
+                graphics.FillEllipse(brush, bounds.Left + 7, bounds.Top + 4, 5, 5);
+                break;
+            case "Lollipop":
+                for (var i = 0; i < 3; i++)
+                {
+                    var x = bounds.Left + 3 + (i * 6);
+                    graphics.DrawLine(pen, x, centerY, x, bounds.Bottom - 1);
+                    graphics.FillEllipse(brush, x - 2, bounds.Top + (i % 2), 4, 4);
+                }
+                break;
+            case "Waterfall":
+                for (var row = 0; row < 3; row++)
+                    for (var column = 0; column < 4; column++)
+                        if ((row + column) % 3 != 0)
+                            graphics.FillRectangle(brush, bounds.Left + (column * 4), bounds.Top + 1 + (row * 4), 3, 3);
+                break;
+            case "Radial Spectrum":
+                var center = new Point(bounds.Left + (bounds.Width / 2), centerY);
+                for (var i = 0; i < 8; i++)
+                {
+                    var angle = (Math.PI * 2 * i / 8) - (Math.PI / 2);
+                    graphics.DrawLine(pen,
+                        center.X + (int)(Math.Cos(angle) * 3),
+                        center.Y + (int)(Math.Sin(angle) * 3),
+                        center.X + (int)(Math.Cos(angle) * 7),
+                        center.Y + (int)(Math.Sin(angle) * 7));
+                }
+                break;
+            case "Contour":
+                graphics.DrawLines(pen, new[]
+                {
+                    new Point(bounds.Left, bounds.Bottom - 2), new Point(bounds.Left + 4, centerY),
+                    new Point(bounds.Left + 8, bounds.Top + 2), new Point(bounds.Left + 12, centerY + 1),
+                    new Point(bounds.Right - 1, bounds.Top + 4)
+                });
+                break;
+            case "Note Map":
+                for (var row = 0; row < 3; row++)
+                    for (var column = 0; column < 3; column++)
+                        if ((row + column) % 2 == 0)
+                            graphics.FillRectangle(brush, bounds.Left + (column * 6), bounds.Top + (row * 4), 4, 3);
+                        else
+                            graphics.DrawRectangle(pen, bounds.Left + (column * 6), bounds.Top + (row * 4), 4, 3);
+                break;
+        }
+    }
+
+    private static void DrawBars(Graphics graphics, SolidBrush brush, Rectangle bounds, int[] heights)
+    {
+        var centerY = bounds.Top + (bounds.Height / 2);
+        for (var i = 0; i < heights.Length; i++)
+            graphics.FillRectangle(brush, bounds.Left + (i * 4), centerY - (heights[i] / 2), 2, heights[i]);
     }
 
     private void PositionSelectionPanel()
@@ -281,11 +438,11 @@ public partial class FormAudioSpectrum : Form
         var compact = width < 800;
         _modeSelectorLabel.Visible = !compact;
         _themeSelectorLabel.Visible = !compact;
-        _modeSelector.Width = compact ? 80 : 98;
+        _modeSelector.Width = compact ? 120 : 138;
         _themeSelector.Width = compact ? 92 : 140;
         _rotationSettingsButton.Visible = width >= 320;
         _rotationSettingsButton.Width = compact ? 64 : 76;
-        _selectionPanel.Width = compact ? 252 : 432;
+        _selectionPanel.Width = compact ? 292 : 472;
         _selectionPanel.Location = new Point(
             Math.Max(60, width - _selectionPanel.Width - 16),
             7);

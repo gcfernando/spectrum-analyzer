@@ -55,16 +55,18 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private SolidBrush _backgroundBrush;
     private readonly SolidBrush _workBrush = new(Color.Black);
-    private readonly SolidBrush _brickShadeBrush = new(Color.FromArgb(65, 0, 0, 0));
-    private readonly SolidBrush _glowOuterBrush = new(Color.FromArgb(30, Color.Cyan));
-    private readonly SolidBrush _glowMiddleBrush = new(Color.FromArgb(90, Color.Cyan));
-    private readonly SolidBrush _glowCoreBrush = new(Color.FromArgb(235, Color.Cyan));
+    private readonly SolidBrush _brickShadeBrush = new(Color.FromArgb(48, 0, 0, 0));
+    private readonly SolidBrush _glowOuterBrush = new(Color.FromArgb(24, Color.Cyan));
+    private readonly SolidBrush _glowMiddleBrush = new(Color.FromArgb(66, Color.Cyan));
+    private readonly SolidBrush _glowCoreBrush = new(Color.FromArgb(224, Color.Cyan));
     private SolidBrush _brickHighlightBrush;
-    private readonly Pen _borderPen = new(Color.FromArgb(120, 0, 0, 0), 1f);
+    private readonly Pen _borderPen = new(Color.FromArgb(92, 167, 177, 188), 1f);
+    private readonly Pen _innerEdgePen = new(Color.FromArgb(24, 255, 255, 255), 1f);
+    private readonly Pen _highlightPen = new(Color.FromArgb(170, 255, 255, 255), 1f);
 
     private readonly SolidBrush _peakBrush = new(Color.White);
 
-    private readonly Pen _gridlinePen = new(Color.FromArgb(36, 255, 255, 255), 1f);
+    private readonly Pen _gridlinePen = new(Color.FromArgb(26, 205, 218, 231), 1f);
 
     private readonly Pen _wavePen = new(Color.Lime, 2f);
     private Color _cachedWaveColor = Color.Empty;
@@ -331,6 +333,8 @@ public sealed class VerticalProgressBar : ProgressBar
             _backgroundBrush?.Dispose();
             _brickHighlightBrush?.Dispose();
             _borderPen?.Dispose();
+            _innerEdgePen?.Dispose();
+            _highlightPen?.Dispose();
             _peakBrush?.Dispose();
             _gridlinePen?.Dispose();
             _workBrush?.Dispose();
@@ -412,6 +416,8 @@ public sealed class VerticalProgressBar : ProgressBar
 
         e.Graphics.FillRectangle(_backgroundBrush, bounds);
         e.Graphics.DrawRectangle(_borderPen, bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1);
+        if (bounds.Width > 3 && bounds.Height > 3)
+            e.Graphics.DrawRectangle(_innerEdgePen, bounds.X + 1, bounds.Y + 1, bounds.Width - 3, bounds.Height - 3);
 
         var padding = BrickPadding;
         var innerX = bounds.X + padding;
@@ -477,6 +483,13 @@ public sealed class VerticalProgressBar : ProgressBar
             else
                 DrawPeakMarker_Line(e.Graphics, innerX, innerW, topInner, bottomInner, innerH, range);
         }
+
+        var topEdge = mode == VisualizationMode.Center || mode == VisualizationMode.Mirror
+            ? topInner + (innerH / 2)
+            : bottomInner - filledH;
+        if (mode != VisualizationMode.Dots && mode != VisualizationMode.Lollipop &&
+            filledH > 1 && topEdge >= topInner && topEdge <= bottomInner)
+            e.Graphics.DrawLine(_highlightPen, innerX, topEdge, innerX + innerW - 1, topEdge);
     }
 
     private void ConfigureGraphicsQuality(Graphics g)
@@ -746,9 +759,9 @@ public sealed class VerticalProgressBar : ProgressBar
 
         // Layer translucent bands inside the control to create a themed halo around the bright core.
         var color = GetLevelColor(fillPercent);
-        _glowOuterBrush.Color = Color.FromArgb(30, color);
-        _glowMiddleBrush.Color = Color.FromArgb(90, color);
-        _glowCoreBrush.Color = Color.FromArgb(235, color);
+        _glowOuterBrush.Color = Color.FromArgb(24, color);
+        _glowMiddleBrush.Color = Color.FromArgb(66, color);
+        _glowCoreBrush.Color = Color.FromArgb(224, color);
 
         g.FillRectangle(_glowOuterBrush, innerX, fillTop, innerW, fillHeight);
 
@@ -770,10 +783,10 @@ public sealed class VerticalProgressBar : ProgressBar
         var stemX = centerX - (stemWidth / 2);
         var color = GetLevelColor(fillPercent);
 
-        _workBrush.Color = Color.FromArgb(110, color);
+        _workBrush.Color = Color.FromArgb(78, color);
         g.FillRectangle(_workBrush, stemX, levelY, stemWidth, Math.Max(1, bottomInner - levelY + 1));
 
-        _workBrush.Color = color;
+        _workBrush.Color = Color.FromArgb(230, color);
         var markerSize = Math.Min(Math.Min(innerW, innerH + 1), 9);
         markerSize = Math.Max(1, markerSize);
         var markerX = centerX - (markerSize / 2);
