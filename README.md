@@ -1,8 +1,60 @@
-# Spectrum — Windows Audio Spectrum Visualizer
-
+<div align="center">
+  <h1>🎚️ Spectrum — Windows Audio Spectrum Visualizer</h1>
+  <p><strong>Real-time system-audio analysis with precise frequency-band measurement and multiple live visualizations.</strong></p>
+  <p><code>▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁ &nbsp; S P E C T R U M &nbsp; ▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁</code></p>
+  <table>
+    <tr>
+      <td><img alt=".NET Framework 4.8" src="https://img.shields.io/badge/.NET%20Framework-4.8-512BD4?style=for-the-badge&amp;logo=dotnet&amp;logoColor=white"></td>
+      <td><img alt="Windows" src="https://img.shields.io/badge/Platform-Windows-0078D4?style=for-the-badge&amp;logo=windows&amp;logoColor=white"></td>
+      <td><img alt="Windows Forms" src="https://img.shields.io/badge/UI-Windows%20Forms-5C2D91?style=for-the-badge"></td>
+      <td><img alt="WASAPI Loopback" src="https://img.shields.io/badge/Audio-WASAPI%20Loopback-00A4EF?style=for-the-badge"></td>
+    </tr>
+  </table>
+  <p><strong>83 logarithmic bands</strong> · <strong>18 visualization modes</strong> · <strong>11 colour themes</strong> · <strong>up to 60 FPS</strong></p>
+</div>
 A .NET Framework 4.8 Windows Forms application that captures your system's audio output in real time and renders it as an animated frequency spectrum using 83 vertical bars. Audio capture is handled by BASS and BassWASAPI via Windows WASAPI loopback.
 
-## Features
+---
+
+<a id="overview"></a>
+## ⚡ At a Glance
+
+| 🎚️ Frequency Analysis | 🎬 Visualization | 🎨 Customization | ⚡ Presentation |
+|:---:|:---:|:---:|:---:|
+| **83 bands** | **18 modes** | **11 themes** | **Up to 60 FPS** |
+| **20 Hz – 20 kHz** | Runtime switching | **5 effects + `None`** | **~32 ms analysis** |
+
+### 🧭 Navigation
+
+[**✨ Features**](#features) · [**🎛️ Modes**](#modes) · [**🪄 Styles**](#styles) · [**🎨 Themes**](#themes) · [**⚙️ Configuration**](#configuration) · [**🏗️ Build**](#build) · [**🧪 Tests**](#tests) · [**📐 Measurement**](#measurement) · [**❓ FAQ**](#faq)
+
+### ⌨️ Keyboard Controls
+
+| Shortcut | Action |
+|:---:|---|
+| <kbd>Ctrl</kbd> + <kbd>M</kbd> | Cycle visualization modes |
+| <kbd>Ctrl</kbd> + <kbd>T</kbd> | Cycle colour themes |
+| <kbd>Ctrl</kbd> + <kbd>R</kbd> | Open Fixed/Random rotation settings |
+| <kbd>F12</kbd> | Toggle always-on-top |
+
+### 🚀 Quick Start
+
+```text
+1. Open Spectrum.sln in Visual Studio 2022
+2. Build the Release configuration
+3. Run Spectrum.exe from Spectrum/bin/Release/
+```
+
+> [!TIP]
+> Spectrum automatically captures the Windows default audio output through WASAPI loopback, so normal use does not require selecting an input device.
+
+---
+
+<a id="features"></a>
+## ✨ Features
+
+> [!NOTE]
+> Spectrum combines measurement accuracy, responsive presentation, runtime customization, and automatic device recovery in a single Windows Forms application.
 
 - **83-bar frequency spectrum** covering 20 Hz – 20 kHz on a logarithmic scale, with a labelled frequency axis (horizontal, bottom) and a labelled level axis (vertical, 0 to -72 dBFS, both sides)
 - **Reference gridlines** at -12/-24/-36/-48/-60 dBFS drawn inside each bar for at-a-glance level reading
@@ -24,7 +76,18 @@ A .NET Framework 4.8 Windows Forms application that captures your system's audio
 - **F12 toggle** — toggle always-on-top
 - **Single-instance** — uses a named mutex to prevent multiple instances
 
-## Visualization Modes
+---
+
+<a id="modes"></a>
+## 🎛️ Visualization Modes
+
+<div align="center">
+
+`Spectrum` · `Bricks` · `LED` · `Dots` · `Wave` · `Lollipop` · `Waterfall` · `Radial Spectrum` · `Contour`
+
+`Peak Trace` · `Threshold Monitor` · `Band Matrix` · `Octave Spectrum` · `Spectral Flux` · `Orbit History` · `Octave Waterfall` · `Transient Map` · `Frequency Ribbon`
+
+</div>
 
 Choose a visualization mode from the **Mode** selector in the title bar to change it immediately. The
 supported modes are:
@@ -50,7 +113,10 @@ supported modes are:
 | `Transient Map` | Compact per-band transient-strength matrix |
 | `Frequency Ribbon` | Layered recent frequency contours |
 
-## Visual Styles
+<a id="styles"></a>
+## 🪄 Visual Styles
+
+> **Style model:** the visualization mode owns the geometry; the selected style adds a compatible presentation effect on top of that mode.
 
 Choose a style from the **Style** selector to overlay an effect without changing the selected mode's
 geometry. `None` is the default and is always safe. Every style is derived from the current display frame or
@@ -68,7 +134,10 @@ Random rotation selects a valid complete Mode × Style × Theme combination.
 | `Scanline` | Marks the current aggregate signal level |
 | `Precision` | Adds static analytical reference guides |
 
-## Colour Themes
+<a id="themes"></a>
+## 🎨 Colour Themes
+
+> **Theme model:** themes affect the signal palette and the surrounding application/control/grid colours while keeping application chrome visually subordinate to the signal.
 
 Choose a palette from the **Theme** selector in the title bar to change bar colours immediately. Themes
 apply semantic application, control, grid, and visualization colors in addition to their signal palette.
@@ -88,7 +157,13 @@ Application chrome remains neutral and subordinate to active signal data.
 | `Crimson Velvet` | Crimson → rose → blush peak | Rich, controlled warm contrast |
 | `Studio` | Teal → blue on graphite/slate chrome | Professional reference theme |
 
-## Configuration
+---
+
+<a id="configuration"></a>
+## ⚙️ Configuration
+
+> [!IMPORTANT]
+> Saved per-user selections take precedence over `App.config` on later launches.
 
 `App.config` still supplies the initial mode, style, and theme when the application starts:
 
@@ -103,14 +178,21 @@ The selected mode, style, and theme, Fixed/Random choice, and random interval ar
 </appSettings>
 ```
 
-## Requirements
+<a id="requirements"></a>
+## 📋 Requirements
+
+> [!IMPORTANT]
+> The application targets **Windows** and **.NET Framework 4.8** and depends on the included native BASS libraries.
 
 - Windows OS
 - [.NET Framework 4.8](https://dotnet.microsoft.com/download/dotnet-framework/net48)
 - Visual Studio 2022 (or MSBuild)
 - The native DLLs `bass.dll` and `basswasapi.dll` (included in `Ref_Files/`)
 
-## Build
+---
+
+<a id="build"></a>
+## 🏗️ Build
 
 Open `Spectrum.sln` in Visual Studio and build (`Ctrl+Shift+B`), or:
 
@@ -120,7 +202,11 @@ msbuild Spectrum.sln -restore -p:RestorePackagesConfig=true -p:Configuration=Rel
 
 The output is placed in `Spectrum/bin/Release/`.
 
-## Tests
+<a id="tests"></a>
+## 🧪 Tests
+
+> [!NOTE]
+> The test suite is signal-driven and deterministic, covering analysis correctness as well as timing, concurrency, stereo behavior, and per-frame cost.
 
 `Spectrum.Tests` (xUnit, .NET Framework 4.8) validates the analysis with deterministic synthetic signals:
 FFT correctness, band-plan geometry, a tone at every bar's centre, amplitude accuracy, band-boundary
@@ -134,11 +220,16 @@ dotnet test Spectrum.Tests/bin/Release/net48/Spectrum.Tests.dll
 vstest.console.exe Spectrum.Tests/bin/Release/net48/Spectrum.Tests.dll /Platform:x86
 ```
 
-## Running
+<a id="running"></a>
+## ▶️ Running
+
+> [!TIP]
+> No input-device selection is required for normal use: capture starts from the Windows default audio output through WASAPI loopback.
 
 Run `Spectrum.exe` from the build output directory. The application automatically selects the Windows default audio output device (WASAPI loopback) and begins capturing.
 
-## Dependencies
+<a id="dependencies"></a>
+## 📦 Dependencies
 
 | Library | Version | Source |
 |---|---|---|
@@ -147,9 +238,14 @@ Run `Spectrum.exe` from the build output directory. The application automaticall
 | `bass.dll` | — | Native BASS audio library |
 | `basswasapi.dll` | — | Native BassWASAPI extension |
 
-## Project Structure
+---
 
-```
+<a id="project-structure"></a>
+## 🗂️ Project Structure
+
+The repository keeps capture/analysis, DSP, presentation ballistics, rendering, configuration, and native references clearly separated:
+
+```text
 Spectrum/
 └── Spectrum/
     ├── Analyzer.cs                  # Device handling, WASAPI capture, analysis scheduling, publication
@@ -167,7 +263,29 @@ Spectrum/
     └── Spectrum.csproj
 ```
 
-## Measurement
+---
+
+<a id="measurement"></a>
+## 📐 Measurement
+
+### Signal pipeline
+
+```mermaid
+flowchart LR
+    A[Windows audio output] --> B[WASAPI loopback]
+    B --> C[Lock-free sample history]
+    C --> D[DC removal + Hann window]
+    D --> E[FFT]
+    E --> F[One-sided bin power]
+    F --> G[Stereo power average]
+    G --> H[83 logarithmic bands]
+    H --> I[dBFS mapping]
+    I --> J[Time-based ballistics]
+    J --> K[Visualization renderer]
+```
+
+> [!NOTE]
+> The visual presentation does not hide the physical time/frequency trade-off described below; low-frequency bands intentionally use longer analysis windows for resolution.
 
 **What a bar shows.** Bar *i* is the power of the captured signal inside a fixed frequency band, in dB
 relative to a full-scale sine (dBFS): a full-scale sine whose energy lies inside one band reads 0 dBFS.
@@ -199,7 +317,12 @@ only the front pair is measured.
 hovering at a brick boundary does not flicker (steady-level display error ≤ ±1.44 dB); the animation runs at ~64 fps. Other visual modes keep their
 own presentation presets.
 
-## FAQ
+---
+
+<a id="faq"></a>
+## ❓ FAQ
+
+> Common questions about high-frequency content and low-frequency response timing.
 
 **The top bars are empty or much lower on some songs. Is something broken?**
 No. Lossy encoders remove high frequencies: most MP3s are encoded with a low-pass at 15–19 kHz, so bars 80–82
@@ -210,8 +333,22 @@ every empty top bar lay above the file's own cut-off). White or pink noise light
 Resolving bass needs a longer analysis window (≈341 ms below ~280 Hz versus ≈85 ms above ~560 Hz), so bass
 bars trail treble bars by roughly 0.1 s. This is the time/frequency trade-off of any FFT analyzer.
 
-## Technical Notes
+<a id="technical-notes"></a>
+## 🔧 Technical Notes
+
+> Implementation details for device-change recovery, stream-hang detection, and silence publication.
 
 - Device changes (plug/unplug, default device switch) are detected via `IMMNotificationClient` and trigger an automatic re-initialisation on the UI thread
 - A hang detector monitors consecutive identical WASAPI levels and forces a device reset if the stream appears stuck
 - Silence (zero level, or no new captured frames) publishes the floor; bars then decay with their release time
+
+---
+
+<div align="center">
+
+### 🎚️ Spectrum
+
+**Windows Audio Spectrum Visualizer · .NET Framework 4.8 · WASAPI Loopback**
+
+</div>
+
