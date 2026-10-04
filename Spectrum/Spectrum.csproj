@@ -14,6 +14,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <ApplicationIcon>Ref_Files\Spectrum.ico</ApplicationIcon>
     <StartupObject>Spectrum.Program</StartupObject>
+    <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
     <!-- Optional: stable builds -->
     <Deterministic>true</Deterministic>
     <LangVersion>latest</LangVersion>
@@ -70,6 +71,26 @@
     <Reference Include="System.Configuration.ConfigurationManager, Version=10.0.0.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>..\packages\System.Configuration.ConfigurationManager.10.0.1\lib\net462\System.Configuration.ConfigurationManager.dll</HintPath>
     </Reference>
+    <Reference Include="System.Buffers, Version=4.0.3.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Buffers.4.5.0\lib\netstandard2.0\System.Buffers.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Memory, Version=4.0.1.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Memory.4.5.3\lib\netstandard2.0\System.Memory.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Numerics.Vectors, Version=4.1.4.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Numerics.Vectors.4.5.0\lib\net46\System.Numerics.Vectors.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Resources.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Resources.Extensions.4.6.0\lib\netstandard2.0\System.Resources.Extensions.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe, Version=4.0.4.1, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Runtime.CompilerServices.Unsafe.4.5.2\lib\netstandard2.0\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="System.Xaml" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Net.Http" />
@@ -82,6 +103,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Ambiance Theme.cs" />
+    <Compile Include="AmbientParticleFieldControl.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Analyzer.cs" />
     <Compile Include="BarBallistics.cs" />
     <Compile Include="BarColorThemes.cs" />
@@ -107,6 +131,10 @@
     </Compile>
     <Compile Include="Taskbar.cs" />
     <Compile Include="VerticalProgressBar.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="VisualStyle.cs" />
+    <Compile Include="WaveSpectrumControl.cs">
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="VisualizerPreferences.cs" />

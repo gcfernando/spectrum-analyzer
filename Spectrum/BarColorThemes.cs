@@ -23,6 +23,12 @@ internal readonly struct BarColorTheme
 
 internal static class BarColorThemes
 {
+    internal static readonly string[] Names =
+    {
+        "ClassicSmooth", "Ice", "Sunset", "MonoCyan", "Synthwave", "Aurora",
+        "Obsidian Gold", "Midnight Prism", "Emerald Noir", "Crimson Velvet"
+    };
+
     // A gentler curve smooths the green-to-yellow-to-orange transition.
     public static readonly BarColorTheme ClassicSmooth = new(
         low: Color.FromArgb(31, 190, 112),
@@ -71,6 +77,38 @@ internal static class BarColorThemes
         peak: Color.FromArgb(206, 213, 244),
         intensityCurve: 1.5f);
 
+    // Obsidian-inspired gold ramp with a pale-gold peak.
+    public static readonly BarColorTheme ObsidianGold = new(
+        low: Color.FromArgb(92, 67, 18),
+        mid: Color.FromArgb(191, 143, 22),
+        high: Color.FromArgb(247, 201, 67),
+        peak: Color.FromArgb(255, 245, 194),
+        intensityCurve: 1.45f);
+
+    // Saturated violet through cyan with a cool-white peak.
+    public static readonly BarColorTheme MidnightPrism = new(
+        low: Color.FromArgb(54, 31, 126),
+        mid: Color.FromArgb(112, 64, 205),
+        high: Color.FromArgb(35, 204, 244),
+        peak: Color.FromArgb(232, 248, 255),
+        intensityCurve: 1.45f);
+
+    // Deep emerald through vivid jade with a mint-white peak.
+    public static readonly BarColorTheme EmeraldNoir = new(
+        low: Color.FromArgb(11, 91, 65),
+        mid: Color.FromArgb(0, 171, 116),
+        high: Color.FromArgb(57, 235, 157),
+        peak: Color.FromArgb(218, 255, 235),
+        intensityCurve: 1.45f);
+
+    // Dark crimson through rose with a soft blush peak.
+    public static readonly BarColorTheme CrimsonVelvet = new(
+        low: Color.FromArgb(103, 21, 45),
+        mid: Color.FromArgb(193, 31, 72),
+        high: Color.FromArgb(244, 90, 118),
+        peak: Color.FromArgb(255, 224, 230),
+        intensityCurve: 1.45f);
+
     public static BarColorTheme Resolve(string name) => (name ?? string.Empty).Trim().ToLowerInvariant() switch
     {
         "ice" => Ice,
@@ -78,6 +116,10 @@ internal static class BarColorThemes
         "monocyan" or "mono" or "monochromecyan" => MonoCyan,
         "synthwave" => Synthwave,
         "aurora" => Aurora,
+        "obsidian gold" => ObsidianGold,
+        "midnight prism" => MidnightPrism,
+        "emerald noir" => EmeraldNoir,
+        "crimson velvet" => CrimsonVelvet,
         _ => ClassicSmooth, // Use the classic palette for empty or unrecognized names.
     };
 }

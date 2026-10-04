@@ -57,7 +57,8 @@
             this.ambiance_ControlBox.BackColor = System.Drawing.Color.Transparent;
             this.ambiance_ControlBox.EnableMaximize = false;
             this.ambiance_ControlBox.Font = new System.Drawing.Font("Marlett", 7F);
-            this.ambiance_ControlBox.Location = new System.Drawing.Point(5, 13);
+            this.ambiance_ControlBox.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.ambiance_ControlBox.Location = new System.Drawing.Point(1132, 8);
             this.ambiance_ControlBox.Name = "ambiance_ControlBox";
             this.ambiance_ControlBox.Size = new System.Drawing.Size(44, 22);
             this.ambiance_ControlBox.TabIndex = 0;
@@ -92,4 +93,3 @@
         private Ambiance_ControlBox ambiance_ControlBox;
     }
 }
-

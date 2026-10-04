@@ -359,13 +359,22 @@ public class Ambiance_ThemeContainer : ContainerControl
     private readonly SolidBrush _separatorBrush = new SolidBrush(Color.FromArgb(82, 75, 60));
     private readonly SolidBrush _titleBrush = new SolidBrush(Color.FromArgb(215, 210, 196));
     private readonly Font _titleFont = new Font("Segoe UI", 9.5f, FontStyle.Regular);
-    private readonly StringFormat _titleFormat = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Near };
+    private readonly StringFormat _titleFormat = new StringFormat
+    {
+        Alignment = StringAlignment.Near,
+        LineAlignment = StringAlignment.Center,
+        Trimming = StringTrimming.EllipsisCharacter,
+        FormatFlags = StringFormatFlags.NoWrap
+    };
 
     private LinearGradientBrush _headerBrush;
     private int _headerBrushWidth;
 
     private LinearGradientBrush _bodyGradientBrush;
     private Size _bodyGradientSize;
+
+    /// <summary>Right edge available to the title after header controls are laid out.</summary>
+    public int TitleRightInset { get; set; }
 
     protected override void CreateHandle() => base.CreateHandle();
 
@@ -460,8 +469,10 @@ public class Ambiance_ThemeContainer : ContainerControl
             G.FillRectangle(Brushes.Black, Width - 4, Height - 2, 2, 1);
         }
 
-        G.DrawString(Text, _titleFont, _titleBrush,
-            new Rectangle(0, 12, Width, MoveHeight), _titleFormat);
+        var titleRight = TitleRightInset > 0 ? Math.Min(TitleRightInset, Width - 12) : Width - 12;
+        var titleBounds = new Rectangle(16, 4, Math.Max(0, titleRight - 16), 28);
+        if (titleBounds.Width > 0 && !string.IsNullOrEmpty(Text))
+            G.DrawString(Text, _titleFont, _titleBrush, titleBounds, _titleFormat);
     }
 }
 
@@ -566,7 +577,7 @@ public class Ambiance_ControlBox : Control
         DoubleBuffered = true;
         BackColor = Color.Transparent;
         Font = new Font("Marlett", 7);
-        Anchor = AnchorStyles.Top | AnchorStyles.Left;
+        Anchor = AnchorStyles.Top | AnchorStyles.Right;
     }
 
     protected override void Dispose(bool disposing)
@@ -595,7 +606,9 @@ public class Ambiance_ControlBox : Control
     protected override void OnCreateControl()
     {
         base.OnCreateControl();
-        Location = new Point(5, 13);
+        Location = Parent == null
+            ? new Point(5, 8)
+            : new Point(Math.Max(5, Parent.ClientSize.Width - Width - 8), 8);
     }
 
     protected override void OnPaint(System.Windows.Forms.PaintEventArgs e)

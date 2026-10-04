@@ -26,6 +26,14 @@ internal sealed class VisualizerPreferences : ApplicationSettingsBase
     }
 
     [UserScopedSetting]
+    [DefaultSettingValue("None")]
+    public string Style
+    {
+        get => (string)this[nameof(Style)];
+        set => this[nameof(Style)] = value;
+    }
+
+    [UserScopedSetting]
     [DefaultSettingValue("Fixed")]
     public string RotationMode
     {

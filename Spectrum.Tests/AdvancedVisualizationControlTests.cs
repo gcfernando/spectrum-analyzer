@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using Spectrum;
@@ -115,6 +116,98 @@ public class AdvancedVisualizationControlTests
         });
     }
 
+    [Fact]
+    public void SpectrumUsesAContinuousFillWhileBricksRemainSegmented()
+    {
+        RunOnSta(() =>
+        {
+            using var spectrum = CreateBar("Spectrum|1");
+            using var bricks = CreateBar("Bricks|1");
+            spectrum.ForeColor = bricks.ForeColor = Color.DodgerBlue;
+            spectrum.HeatmapEnabled = bricks.HeatmapEnabled = false;
+            spectrum.BrickHighlight = bricks.BrickHighlight = false;
+            SetDisplayedLevel(spectrum, 200);
+            SetDisplayedLevel(bricks, 200);
+
+            using var spectrumBitmap = new Bitmap(spectrum.Width, spectrum.Height);
+            using var bricksBitmap = new Bitmap(bricks.Width, bricks.Height);
+            spectrum.DrawToBitmap(spectrumBitmap, new Rectangle(Point.Empty, spectrum.Size));
+            bricks.DrawToBitmap(bricksBitmap, new Rectangle(Point.Empty, bricks.Size));
+
+            for (var y = 35; y <= 110; y++)
+                Assert.Equal(Color.DodgerBlue.ToArgb(), spectrumBitmap.GetPixel(spectrum.Width / 2, y).ToArgb());
+
+            Assert.Contains(Enumerable.Range(35, 76),
+                y => bricksBitmap.GetPixel(bricks.Width / 2, y).ToArgb() != Color.DodgerBlue.ToArgb());
+        });
+    }
+
+    [Fact]
+    public void LedRendersActiveCellsAsCirclesInsteadOfBrickRectangles()
+    {
+        RunOnSta(() =>
+        {
+            using var led = CreateBar("LED|1");
+            using var bricks = CreateBar("Bricks|1");
+            led.ForeColor = bricks.ForeColor = Color.DodgerBlue;
+            led.HeatmapEnabled = bricks.HeatmapEnabled = false;
+            led.BrickHighlight = bricks.BrickHighlight = false;
+            SetDisplayedLevel(led, 200);
+            SetDisplayedLevel(bricks, 200);
+
+            using var ledBitmap = Render(led);
+            using var brickBitmap = Render(bricks);
+
+            const int cellLeft = 6;
+            const int cellTop = 113;
+            const int cellCenterX = 9;
+            const int cellCenterY = 116;
+
+            Assert.Equal(Color.DodgerBlue.ToArgb(), ledBitmap.GetPixel(cellCenterX, cellCenterY).ToArgb());
+            Assert.Equal(led.BackColor.ToArgb(), ledBitmap.GetPixel(cellLeft, cellTop).ToArgb());
+            Assert.NotEqual(bricks.BackColor.ToArgb(), brickBitmap.GetPixel(cellLeft, cellTop).ToArgb());
+        });
+    }
+
+    [Fact]
+    public void LedKeepsTheSegmentedCellCountOfTheBrickMeter()
+    {
+        RunOnSta(() =>
+        {
+            using var led = CreateBar("LED|1");
+            using var bricks = CreateBar("Bricks|1");
+            led.ForeColor = bricks.ForeColor = Color.DodgerBlue;
+            led.HeatmapEnabled = bricks.HeatmapEnabled = false;
+            led.BrickHighlight = bricks.BrickHighlight = false;
+            SetDisplayedLevel(led, 200);
+            SetDisplayedLevel(bricks, 200);
+
+            using var ledBitmap = Render(led);
+            using var brickBitmap = Render(bricks);
+
+            var ledCellCount = CountActiveCellCenters(ledBitmap);
+            Assert.True(ledCellCount > 0);
+            Assert.Equal(ledCellCount, CountActiveCellCenters(brickBitmap));
+            Assert.True(CountColorPixels(ledBitmap, Color.DodgerBlue) < CountColorPixels(brickBitmap, Color.DodgerBlue));
+        });
+    }
+
+    [Fact]
+    public void WaveConnectsAdjacentFrequencyBandsAcrossTheFullWidth()
+    {
+        var levels = new[] { 0f, 255f, 64f, 192f };
+        var points = new PointF[levels.Length];
+
+        WaveSpectrumControl.PopulateFrequencyPoints(levels, 401, 101, points);
+
+        Assert.Equal(0f, points[0].X);
+        Assert.Equal(400f, points[points.Length - 1].X);
+        Assert.Equal(100f, points[0].Y);
+        Assert.Equal(0f, points[1].Y);
+        for (var i = 1; i < points.Length; i++)
+            Assert.Equal(400f / (levels.Length - 1), points[i].X - points[i - 1].X, 3);
+    }
+
     private static VerticalProgressBar CreateBar(string mode) => new()
     {
         BackColor = Color.FromArgb(50, 50, 50),
@@ -131,6 +224,38 @@ public class AdvancedVisualizationControlTests
         typeof(VerticalProgressBar)
             .GetField("_displayValue", BindingFlags.Instance | BindingFlags.NonPublic)
             .SetValue(bar, level);
+    }
+
+    private static Bitmap Render(VerticalProgressBar bar)
+    {
+        var bitmap = new Bitmap(bar.Width, bar.Height);
+        bar.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bar.Size));
+        return bitmap;
+    }
+
+    private static int CountActiveCellCenters(Bitmap bitmap)
+    {
+        var active = 0;
+        for (var y = 116; y >= 4; y -= 8)
+        {
+            if (bitmap.GetPixel(bitmap.Width / 2, y).ToArgb() == Color.DodgerBlue.ToArgb())
+                active++;
+        }
+        return active;
+    }
+
+    private static int CountColorPixels(Bitmap bitmap, Color color)
+    {
+        var count = 0;
+        for (var y = 0; y < bitmap.Height; y++)
+        {
+            for (var x = 0; x < bitmap.Width; x++)
+            {
+                if (bitmap.GetPixel(x, y).ToArgb() == color.ToArgb())
+                    count++;
+            }
+        }
+        return count;
     }
 
     private static int CountNonBackgroundPixels(Bitmap bitmap, Color background)

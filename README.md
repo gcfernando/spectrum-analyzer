@@ -7,9 +7,10 @@ A .NET Framework 4.8 Windows Forms application that captures your system's audio
 - **83-bar frequency spectrum** covering 20 Hz – 20 kHz on a logarithmic scale, with a labelled frequency axis (horizontal, bottom) and a labelled level axis (vertical, 0 to -72 dBFS, both sides)
 - **Reference gridlines** at -12/-24/-36/-48/-60 dBFS drawn inside each bar for at-a-glance level reading
 - **Measured band levels** — each bar is the integrated power of its frequency band in dBFS (see *Measurement*)
-- **14 visualization modes** selectable at runtime, with an initial value from `App.config`
-- **6 colour themes** selectable at runtime, independent of mode, with an initial value from `App.config`
-- **Live mode and theme selectors** in the title bar; changes apply immediately without restarting
+- **13 visualization modes** selectable at runtime, with an initial value from `App.config`
+- **Optional Pulse and Glow styles** for Spectrum, LED, and Wave, with a safe `None` default
+- **10 colour themes** selectable at runtime, independent of mode, with an initial value from `App.config`
+- **Live mode, style, and theme selectors** in the title bar; changes apply immediately without restarting
 - **Heat-map colour gradient** with peak markers tinted to match their theme's colour at that height
 - **Peak-hold markers** with configurable hold time and decay
 - **Asymmetric ballistics** — fast attack, slower release per mode
@@ -30,20 +31,31 @@ supported modes are:
 
 | Mode | Best For |
 |---|---|
-| `Spectrum` (fallback) | All-around; real-time frequency analysis |
+| `Spectrum` (fallback) | All-around; smooth continuous real-time frequency analysis |
 | `Bricks` (configured startup mode) | Retro block aesthetic; 80s/Synthwave music |
 | `LED` | Professional peak meter; recording studios |
 | `Dots` | Smooth minimal style; ambient music |
 | `Wave` | Flowing organic motion; lo-fi / chill-hop |
-| `Pulse` | Breathing hypnotic effect; meditation / downtempo |
 | `Center` | Energy from centre; orchestral / cinematic |
 | `Mirror` | Symmetrical balance; EDM / house music |
-| `Glow` | Soft level-driven halo with a bright core; a visual treatment only, not beat detection |
 | `Lollipop` | Thin frequency stems with a marker showing each current level |
 | `Waterfall` | Scrolling history of recent frequency levels |
 | `Radial Spectrum` | Frequency bands arranged around a circle |
 | `Contour` | Connected curve across frequency bands; interpolation is visual only |
 | `Note Map` | Approximate pitch-class view grouped from frequency bands |
+| `Ambient Particles` | Bounded deterministic particle field driven directly by copied display levels |
+
+## Visual Styles
+
+Choose a style from the **Style** selector to overlay an effect without changing the selected mode's
+geometry. `None` is the default and is always safe. `Pulse` and `Glow` are available only with
+`Spectrum`, `LED`, and `Wave`; unsupported modes show `None` rather than implying that an effect is active.
+
+| Style | Effect |
+|---|---|
+| `None` (default) | No overlay |
+| `Pulse` | Gently brightens the current palette over time |
+| `Glow` | Adds a soft level-driven halo |
 
 ## Colour Themes
 
@@ -58,17 +70,22 @@ control only the bar colour palette and are independent of, and composable with,
 | `MonoCyan` | Single-hue cyan, brightness-graded, pale cyan peak | Clean, modern, monochrome/studio look |
 | `Synthwave` | Purple → magenta → pink, electric-cyan peak | 80s retro, synthwave, neon party visuals |
 | `Aurora` | Deep teal → emerald → cyan, pale violet peak | Cool, luminous ambient visuals |
+| `Obsidian Gold` | Dark gold → radiant gold → pale gold peak | Premium, classic display warmth |
+| `Midnight Prism` | Violet → electric cyan → cool-white peak | High-contrast nocturnal neon |
+| `Emerald Noir` | Deep emerald → vivid jade → mint-white peak | Luxurious green-on-black contrast |
+| `Crimson Velvet` | Dark crimson → rose → blush peak | Rich, dramatic warm contrast |
 
 ## Configuration
 
-`App.config` still supplies the initial mode and theme when the application starts:
+`App.config` still supplies the initial mode, style, and theme when the application starts:
 
 Runtime selections apply immediately for the current session and do not modify `App.config`.
-The selected mode and theme, Fixed/Random choice, and random interval are saved in the current Windows user's application settings; saved choices take precedence over `App.config` on later launches.
+The selected mode, style, and theme, Fixed/Random choice, and random interval are saved in the current Windows user's application settings; saved choices take precedence over `App.config` on later launches. Legacy `Mode=Pulse` migrates to `Bricks` plus `Pulse`, and `Mode=Glow` migrates to `Spectrum` plus `Glow`, without rewriting the source setting.
 
 ```xml
 <appSettings>
   <add key="Mode" value="Bricks"/>
+  <add key="Style" value="None"/>
   <add key="Theme" value="ClassicSmooth"/>
 </appSettings>
 ```

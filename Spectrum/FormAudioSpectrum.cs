@@ -19,13 +19,12 @@ public partial class FormAudioSpectrum : Form
     };
     private static readonly string[] s_visualModes =
     {
-        "Spectrum", "Bricks", "LED", "Dots", "Wave", "Pulse", "Center", "Mirror", "Glow",
-        "Lollipop", "Waterfall", "Radial Spectrum", "Contour", "Note Map"
+        "Spectrum", "Bricks", "LED", "Dots", "Wave", "Center", "Mirror",
+    "Lollipop", "Waterfall", "Radial Spectrum", "Contour", "Note Map", "Ambient Particles"
     };
-    private static readonly string[] s_colorThemes =
-    {
-        "ClassicSmooth", "Ice", "Sunset", "MonoCyan", "Synthwave", "Aurora"
-    };
+    private static readonly string[] s_colorThemes = BarColorThemes.Names;
+
+    internal static string[] ColorThemeNames => (string[])s_colorThemes.Clone();
 
     // Spectrum mode uses elapsed-time ballistics: a 45 ms attack, 380 ms release, and 300 ms peak hold.
     internal const int SPECTRUM_ATTACK_MS = 45;
@@ -56,6 +55,8 @@ public partial class FormAudioSpectrum : Form
 
     private VerticalProgressBar[] _progressBars;
     private AdvancedVisualizationControl _advancedVisualizer;
+    private WaveSpectrumControl _waveVisualizer;
+    private AmbientParticleFieldControl _ambientParticleField;
     private Label[] _axisLabels;
     private Label[] _dbAxisLabelsLeft;
     private Label[] _dbAxisLabelsRight;
@@ -66,13 +67,16 @@ public partial class FormAudioSpectrum : Form
 
     private BandPlan _layoutPlan;
     private string _visualMode;
+    private string _visualStyle;
     private string _barTheme;
     private ComboBox _modeSelector;
+    private ComboBox _styleSelector;
     private ComboBox _themeSelector;
     private Button _rotationSettingsButton;
     private ToolTip _selectionToolTip;
     private FlowLayoutPanel _selectionPanel;
     private Label _modeSelectorLabel;
+    private Label _styleSelectorLabel;
     private Label _themeSelectorLabel;
     private bool _initializingSelectors;
     private bool _randomRotationEnabled;
@@ -147,7 +151,10 @@ public partial class FormAudioSpectrum : Form
         var configuredTheme = string.IsNullOrWhiteSpace(preferences.Theme)
             ? ConfigurationManager.AppSettings["Theme"]
             : preferences.Theme;
-        _visualMode = ResolveConfiguredMode(configuredMode);
+        var configuredStyle = string.IsNullOrWhiteSpace(preferences.Style)
+            ? ConfigurationManager.AppSettings["Style"]
+            : preferences.Style;
+        ResolveConfiguredVisualState(configuredMode, configuredStyle, out _visualMode, out _visualStyle);
         _barTheme = ResolveConfiguredTheme(configuredTheme);
         _randomRotationEnabled = string.Equals(preferences.RotationMode, "Random", StringComparison.OrdinalIgnoreCase);
         _rotationIntervalMinutes = Math.Max(1, Math.Min(240, preferences.RotationIntervalMinutes));
@@ -156,12 +163,14 @@ public partial class FormAudioSpectrum : Form
         try
         {
             _modeSelector.SelectedItem = _visualMode;
+            _styleSelector.SelectedItem = GetAppliedVisualStyle(_visualMode, _visualStyle);
             _themeSelector.SelectedItem = _barTheme;
         }
         finally
         {
             _initializingSelectors = false;
         }
+        UpdateStyleSelector();
 
         InitializeBarsOptimized(_visualMode);
         UpdateRotationSettingsButton();
@@ -171,7 +180,11 @@ public partial class FormAudioSpectrum : Form
         _analyzer = new Analyzer();
         Analyzer.OnChange += Spectrum_Change;
 
-        Shown += (s, e) => RecalculateBarLayout();
+        Shown += (s, e) =>
+        {
+            PositionSelectionPanel();
+            RecalculateBarLayout();
+        };
 
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
@@ -186,7 +199,7 @@ public partial class FormAudioSpectrum : Form
             FlowDirection = FlowDirection.LeftToRight,
             Location = new Point(0, 7),
             Name = "selectionPanel",
-            Size = new Size(348, 25),
+            Size = new Size(560, 25),
             TabIndex = 1,
             WrapContents = false,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
@@ -203,10 +216,26 @@ public partial class FormAudioSpectrum : Form
             Margin = new Padding(0, 0, 0, 0)
         };
 
-        _modeSelector = CreateSelector("modeSelector", 98, s_visualModes, false);
+        _modeSelector = CreateSelector("modeSelector", 150, s_visualModes, false);
         _modeSelector.AccessibleName = "Visualization mode";
         _modeSelector.AccessibleDescription = "Press Ctrl+M to cycle visualization modes";
         _modeSelector.TabIndex = 0;
+
+        _styleSelectorLabel = new Label
+        {
+            AutoSize = false,
+            ForeColor = Color.FromArgb(215, 210, 196),
+            Font = ambiance_ThemeSpectrum.Font,
+            Text = "&Style",
+            TextAlign = ContentAlignment.MiddleLeft,
+            Size = new Size(37, 24),
+            Margin = new Padding(7, 0, 0, 0)
+        };
+
+        _styleSelector = CreateSelector("styleSelector", 110, VisualStyles.Names, false, true);
+        _styleSelector.AccessibleName = "Optional visual style";
+        _styleSelector.AccessibleDescription = "Optional Pulse or Glow overlay. Styles apply only to Spectrum, LED, and Wave modes.";
+        _styleSelector.TabIndex = 1;
 
         _themeSelectorLabel = new Label
         {
@@ -219,10 +248,10 @@ public partial class FormAudioSpectrum : Form
             Margin = new Padding(7, 0, 0, 0)
         };
 
-        _themeSelector = CreateSelector("themeSelector", 140, s_colorThemes, true);
+        _themeSelector = CreateSelector("themeSelector", 160, s_colorThemes, true);
         _themeSelector.AccessibleName = "Bar color theme";
         _themeSelector.AccessibleDescription = "Press Ctrl+T to cycle bar color themes";
-        _themeSelector.TabIndex = 1;
+        _themeSelector.TabIndex = 2;
 
         _rotationSettingsButton = new Button
         {
@@ -233,7 +262,7 @@ public partial class FormAudioSpectrum : Form
             Name = "rotationSettingsButton",
             Size = new Size(76, 24),
             Text = "Fixed",
-            TabIndex = 2,
+            TabIndex = 3,
             Margin = new Padding(8, 0, 0, 0),
             AccessibleName = "Mode and theme rotation settings"
         };
@@ -244,17 +273,20 @@ public partial class FormAudioSpectrum : Form
 
         _selectionPanel.Controls.Add(_modeSelectorLabel);
         _selectionPanel.Controls.Add(_modeSelector);
+        _selectionPanel.Controls.Add(_styleSelectorLabel);
+        _selectionPanel.Controls.Add(_styleSelector);
         _selectionPanel.Controls.Add(_themeSelectorLabel);
         _selectionPanel.Controls.Add(_themeSelector);
         _selectionPanel.Controls.Add(_rotationSettingsButton);
         _modeSelector.SelectedIndexChanged += ModeSelector_SelectedIndexChanged;
+        _styleSelector.SelectedIndexChanged += StyleSelector_SelectedIndexChanged;
         _themeSelector.SelectedIndexChanged += ThemeSelector_SelectedIndexChanged;
         ambiance_ThemeSpectrum.Controls.Add(_selectionPanel);
         PositionSelectionPanel();
         ambiance_ThemeSpectrum.SizeChanged += (s, e) => PositionSelectionPanel();
     }
 
-    private ComboBox CreateSelector(string name, int width, string[] choices, bool isThemeSelector)
+    private ComboBox CreateSelector(string name, int width, string[] choices, bool isThemeSelector, bool isStyleSelector = false)
     {
         var selector = new ComboBox
         {
@@ -273,11 +305,11 @@ public partial class FormAudioSpectrum : Form
         };
         foreach (var choice in choices)
             selector.Items.Add(choice);
-        selector.DrawItem += (sender, args) => DrawSelectorItem(args, isThemeSelector);
+        selector.DrawItem += (sender, args) => DrawSelectorItem(args, isThemeSelector, isStyleSelector);
         return selector;
     }
 
-    private void DrawSelectorItem(DrawItemEventArgs e, bool isThemeSelector)
+    private void DrawSelectorItem(DrawItemEventArgs e, bool isThemeSelector, bool isStyleSelector)
     {
         if (e.Index < 0)
             return;
@@ -287,7 +319,8 @@ public partial class FormAudioSpectrum : Form
         using var backgroundBrush = new SolidBrush(background);
         e.Graphics.FillRectangle(backgroundBrush, e.Bounds);
 
-        var choice = (string)(isThemeSelector ? _themeSelector.Items[e.Index] : _modeSelector.Items[e.Index]);
+        var choice = (string)(isThemeSelector ? _themeSelector.Items[e.Index] :
+            isStyleSelector ? _styleSelector.Items[e.Index] : _modeSelector.Items[e.Index]);
         var textLeft = e.Bounds.Left + 8;
         if (isThemeSelector)
         {
@@ -302,6 +335,11 @@ public partial class FormAudioSpectrum : Form
             e.Graphics.FillRectangle(highBrush, swatch.Left + 20, swatch.Top, 10, swatch.Height);
             e.Graphics.DrawRectangle(swatchPen, swatch);
             textLeft = swatch.Right + 8;
+        }
+        else if (isStyleSelector)
+        {
+            DrawStyleIcon(e.Graphics, choice, new Rectangle(e.Bounds.Left + 7, e.Bounds.Top + 4, 20, 14), _barTheme);
+            textLeft = e.Bounds.Left + 34;
         }
         else
         {
@@ -318,6 +356,32 @@ public partial class FormAudioSpectrum : Form
             using var selectionPen = new Pen(Color.FromArgb(80, 143, 185, 201));
             e.Graphics.DrawRectangle(selectionPen, e.Bounds.Left, e.Bounds.Top,
                 e.Bounds.Width - 1, e.Bounds.Height - 1);
+        }
+    }
+
+    private static void DrawStyleIcon(Graphics graphics, string style, Rectangle bounds, string themeName)
+    {
+        var color = BarColorThemes.Resolve(themeName).High;
+        using var pen = new Pen(color, 1.6f);
+        using var brush = new SolidBrush(color);
+        if (string.Equals(style, "Pulse", StringComparison.OrdinalIgnoreCase))
+        {
+            graphics.DrawLines(pen, new[]
+            {
+                new Point(bounds.Left, bounds.Bottom - 3), new Point(bounds.Left + 5, bounds.Bottom - 3),
+                new Point(bounds.Left + 9, bounds.Top + 1), new Point(bounds.Left + 13, bounds.Bottom - 3),
+                new Point(bounds.Right - 1, bounds.Bottom - 3)
+            });
+        }
+        else if (string.Equals(style, "Glow", StringComparison.OrdinalIgnoreCase))
+        {
+            using var glowPen = new Pen(Color.FromArgb(90, color), 4f);
+            graphics.DrawEllipse(glowPen, bounds.Left + 4, bounds.Top + 1, 11, 11);
+            graphics.FillEllipse(brush, bounds.Left + 7, bounds.Top + 4, 5, 5);
+        }
+        else
+        {
+            graphics.DrawLine(pen, bounds.Left + 2, bounds.Bottom - 2, bounds.Right - 2, bounds.Top + 2);
         }
     }
 
@@ -354,14 +418,6 @@ public partial class FormAudioSpectrum : Form
                     new Point(bounds.Right - 1, centerY)
                 });
                 break;
-            case "Pulse":
-                graphics.DrawLines(pen, new[]
-                {
-                    new Point(bounds.Left, centerY), new Point(bounds.Left + 5, centerY),
-                    new Point(bounds.Left + 8, bounds.Top + 1), new Point(bounds.Left + 11, bounds.Bottom - 1),
-                    new Point(bounds.Left + 14, centerY), new Point(bounds.Right - 1, centerY)
-                });
-                break;
             case "Center":
                 for (var i = 0; i < 4; i++)
                     graphics.DrawLine(pen, bounds.Left + 2 + (i * 5), centerY - 1, bounds.Left + 2 + (i * 5), centerY + 2);
@@ -373,11 +429,6 @@ public partial class FormAudioSpectrum : Form
                     graphics.DrawLine(pen, x, centerY - 1, x, bounds.Top + 1);
                     graphics.DrawLine(pen, x, centerY + 1, x, bounds.Bottom - 1);
                 }
-                break;
-            case "Glow":
-                using (var glowPen = new Pen(Color.FromArgb(90, color), 4f))
-                    graphics.DrawEllipse(glowPen, bounds.Left + 4, bounds.Top + 1, 11, 11);
-                graphics.FillEllipse(brush, bounds.Left + 7, bounds.Top + 4, 5, 5);
                 break;
             case "Lollipop":
                 for (var i = 0; i < 3; i++)
@@ -421,6 +472,10 @@ public partial class FormAudioSpectrum : Form
                         else
                             graphics.DrawRectangle(pen, bounds.Left + (column * 6), bounds.Top + (row * 4), 4, 3);
                 break;
+            case "Ambient Particles":
+                for (var i = 0; i < 6; i++)
+                    graphics.FillEllipse(brush, bounds.Left + ((i * 7) % 19), bounds.Top + ((i * 5) % 12), 3, 3);
+                break;
         }
     }
 
@@ -434,19 +489,29 @@ public partial class FormAudioSpectrum : Form
     private void PositionSelectionPanel()
     {
         if (_selectionPanel == null) return;
+
         var width = ambiance_ThemeSpectrum.ClientSize.Width;
-        var compact = width < 800;
+        var compact = width < 980;
+        var narrow = width < 700;
         _modeSelectorLabel.Visible = !compact;
-        _themeSelectorLabel.Visible = !compact;
-        _modeSelector.Width = compact ? 120 : 138;
-        _themeSelector.Width = compact ? 92 : 140;
+        _styleSelectorLabel.Visible = !compact && !narrow;
+        _themeSelectorLabel.Visible = !compact && !narrow;
+        _modeSelector.Width = compact ? 114 : 150;
+        _styleSelector.Width = compact ? 88 : 110;
+        _themeSelector.Width = compact ? 118 : 160;
+        _styleSelector.Visible = !narrow;
+        _themeSelector.Visible = !narrow;
         _rotationSettingsButton.Visible = width >= 320;
         _rotationSettingsButton.Width = compact ? 64 : 76;
-        _selectionPanel.Width = compact ? 292 : 472;
+        _selectionPanel.Width = narrow ? 180 : compact ? 400 : 650;
+        var controlBoxRightInset = ambiance_ControlBox.Width + 16;
         _selectionPanel.Location = new Point(
-            Math.Max(60, width - _selectionPanel.Width - 16),
+            Math.Max(8, width - controlBoxRightInset - _selectionPanel.Width - 8),
             7);
-        ambiance_ThemeSpectrum.Text = width < 1000 ? string.Empty : "Audio Spectrum Analyzer";
+        ambiance_ThemeSpectrum.TitleRightInset = width < 520
+            ? 16
+            : Math.Max(16, _selectionPanel.Left - 12);
+        ambiance_ThemeSpectrum.Text = width < 520 ? string.Empty : "Audio Spectrum Analyzer";
     }
 
     private static string ResolveConfiguredChoice(string configuredValue, string[] choices, string fallback)
@@ -468,6 +533,10 @@ public partial class FormAudioSpectrum : Form
         var normalized = configuredValue.Trim();
         switch (normalized.ToLowerInvariant())
         {
+            case "pulse":
+                return "Bricks";
+            case "glow":
+                return "Spectrum";
             case "ppmi i":
             case "ppmi i b":
             case "ppmi i a":
@@ -493,6 +562,24 @@ public partial class FormAudioSpectrum : Form
         return ResolveConfiguredChoice(normalized, s_colorThemes, "ClassicSmooth");
     }
 
+    internal static void ResolveConfiguredVisualState(
+        string configuredMode, string configuredStyle, out string mode, out string style)
+    {
+        var legacyMode = (configuredMode ?? string.Empty).Trim();
+        mode = ResolveConfiguredMode(legacyMode);
+        style = VisualStyles.Resolve(configuredStyle);
+
+        if (string.Equals(legacyMode, "Pulse", StringComparison.OrdinalIgnoreCase))
+            style = "Pulse";
+        else if (string.Equals(legacyMode, "Glow", StringComparison.OrdinalIgnoreCase))
+            style = "Glow";
+    }
+
+    internal static bool IsVisualStyleSupported(string mode) => VisualStyles.IsSupported(mode);
+
+    internal static string GetAppliedVisualStyle(string mode, string style) =>
+        IsVisualStyleSupported(mode) ? VisualStyles.Resolve(style) : "None";
+
     private static bool IsAdvancedMode(string mode)
     {
         foreach (var advancedMode in s_advancedModes)
@@ -502,6 +589,12 @@ public partial class FormAudioSpectrum : Form
         }
         return false;
     }
+
+    private static bool IsWaveMode(string mode)
+        => string.Equals(mode, "Wave", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAmbientParticleMode(string mode)
+        => string.Equals(mode, "Ambient Particles", StringComparison.OrdinalIgnoreCase);
 
     private static AdvancedVisualizationMode ResolveAdvancedMode(string mode)
     {
@@ -536,10 +629,56 @@ public partial class FormAudioSpectrum : Form
 
         _advancedVisualizer.Mode = ResolveAdvancedMode(mode);
         _advancedVisualizer.ThemeName = _barTheme;
+        _waveVisualizer.SetTheme(theme);
+        _ambientParticleField.SetTheme(theme);
+        ApplyVisualStyle();
+        UpdateStyleSelector();
         if (!_applyingRandomSelection)
             SaveVisualPreferences();
         ResetRotationTimer();
         RecalculateBarLayout();
+    }
+
+    private void StyleSelector_SelectedIndexChanged(object sender, EventArgs e)
+    {
+        if (_initializingSelectors || _progressBars == null || !(_styleSelector.SelectedItem is string style))
+            return;
+
+        _visualStyle = VisualStyles.Resolve(style);
+        ApplyVisualStyle();
+        if (!_applyingRandomSelection)
+            SaveVisualPreferences();
+    }
+
+    private void ApplyVisualStyle()
+    {
+        var style = VisualStyles.Parse(GetAppliedVisualStyle(_visualMode, _visualStyle));
+        foreach (var progress in _progressBars)
+        {
+            progress.VisualStyle = style;
+            progress.Invalidate();
+        }
+
+        _waveVisualizer.Style = style;
+    }
+
+    private void UpdateStyleSelector()
+    {
+        var supported = IsVisualStyleSupported(_visualMode);
+        _styleSelector.Enabled = supported;
+        _styleSelector.AccessibleDescription = supported
+            ? "Optional Pulse or Glow overlay for this mode."
+            : $"Styles are unavailable for {_visualMode}; None is applied.";
+
+        _initializingSelectors = true;
+        try
+        {
+            _styleSelector.SelectedItem = GetAppliedVisualStyle(_visualMode, _visualStyle);
+        }
+        finally
+        {
+            _initializingSelectors = false;
+        }
     }
 
     private void ThemeSelector_SelectedIndexChanged(object sender, EventArgs e)
@@ -550,6 +689,7 @@ public partial class FormAudioSpectrum : Form
         _barTheme = themeName;
         var theme = BarColorThemes.Resolve(themeName);
         _advancedVisualizer.ThemeName = themeName;
+        _ambientParticleField.SetTheme(theme);
         foreach (var progress in _progressBars)
         {
             ApplyColorThemeOptimized(progress, theme);
@@ -671,6 +811,7 @@ public partial class FormAudioSpectrum : Form
     {
         var preferences = VisualizerPreferences.Default;
         preferences.Mode = _visualMode;
+        preferences.Style = VisualStyles.Resolve(_visualStyle);
         preferences.Theme = _barTheme;
         preferences.RotationMode = _randomRotationEnabled ? "Random" : "Fixed";
         preferences.RotationIntervalMinutes = _rotationIntervalMinutes;
@@ -731,6 +872,7 @@ public partial class FormAudioSpectrum : Form
 
                 ApplyMeterPresetOptimized(progress, visualMode);
                 ApplyColorThemeOptimized(progress, theme);
+                progress.VisualStyle = VisualStyles.Parse(GetAppliedVisualStyle(_visualMode, _visualStyle));
 
                 _progressBars[i] = progress;
                 ambiance_ThemeSpectrum.Controls.Add(progress);
@@ -745,6 +887,21 @@ public partial class FormAudioSpectrum : Form
                 Visible = IsAdvancedMode(visualMode)
             };
             ambiance_ThemeSpectrum.Controls.Add(_advancedVisualizer);
+
+            _waveVisualizer = new WaveSpectrumControl(BAR_COUNT)
+            {
+                Visible = IsWaveMode(visualMode)
+            };
+            _waveVisualizer.SetTheme(theme);
+            _waveVisualizer.Style = VisualStyles.Parse(GetAppliedVisualStyle(_visualMode, _visualStyle));
+            ambiance_ThemeSpectrum.Controls.Add(_waveVisualizer);
+
+            _ambientParticleField = new AmbientParticleFieldControl
+            {
+                Visible = IsAmbientParticleMode(visualMode)
+            };
+            _ambientParticleField.SetTheme(theme);
+            ambiance_ThemeSpectrum.Controls.Add(_ambientParticleField);
 
             _axisLabels = new Label[s_axisLandmarksHz.Length];
             for (var i = 0; i < _axisLabels.Length; i++)
@@ -855,6 +1012,8 @@ public partial class FormAudioSpectrum : Form
         var availW  = cw - 2 * marginX;
         var strideF = (float)availW / BAR_COUNT;
         var advancedMode = IsAdvancedMode(_visualMode);
+        var waveMode = IsWaveMode(_visualMode);
+        var ambientParticleMode = IsAmbientParticleMode(_visualMode);
 
         ambiance_ThemeSpectrum.SuspendLayout();
         try
@@ -865,13 +1024,19 @@ public partial class FormAudioSpectrum : Form
                 var nextX = marginX + (int)((i + 1) * strideF);
                 _progressBars[i].Location = new Point(x, startY);
                 _progressBars[i].Size     = new Size(Math.Max(2, nextX - x), barH);
-                _progressBars[i].Visible = !advancedMode;
+                _progressBars[i].Visible = !advancedMode && !waveMode && !ambientParticleMode;
             }
 
             _advancedVisualizer.Location = new Point(marginX, startY);
             _advancedVisualizer.Size = new Size(Math.Max(1, availW), barH);
             _advancedVisualizer.Visible = advancedMode;
             _advancedVisualizer.SetBandPlan(_analyzer?.CurrentBandPlan ?? s_defaultPlan);
+            _waveVisualizer.Location = new Point(marginX, startY);
+            _waveVisualizer.Size = new Size(Math.Max(1, availW), barH);
+            _waveVisualizer.Visible = waveMode;
+            _ambientParticleField.Location = new Point(marginX, startY);
+            _ambientParticleField.Size = new Size(Math.Max(1, availW), barH);
+            _ambientParticleField.Visible = ambientParticleMode;
             LayoutAxisLabels(marginX, strideF, axisLabelY, cw);
 
             if (advancedMode)
@@ -1174,6 +1339,10 @@ public partial class FormAudioSpectrum : Form
 
         if (IsAdvancedMode(_visualMode))
             _advancedVisualizer.SetSpectrum(_applyBuffer);
+        else if (IsWaveMode(_visualMode))
+            _waveVisualizer.SetSpectrum(_applyBuffer);
+        else if (IsAmbientParticleMode(_visualMode))
+            _ambientParticleField.SetSpectrum(_applyBuffer);
 
         var plan = _analyzer?.CurrentBandPlan;
         if (plan != null && !ReferenceEquals(plan, _layoutPlan))
@@ -1257,20 +1426,6 @@ public partial class FormAudioSpectrum : Form
                 progress.PeakHoldMilliseconds = 120;
                 break;
 
-            case "pulse":
-                progress.UseAsymmetricBallistics = true;
-                progress.ResponseTimeMs = 130;
-                progress.ReleaseTimeMs = 520;
-                progress.PeakHoldMilliseconds = 0;
-                break;
-
-            case "glow":
-                progress.UseAsymmetricBallistics = true;
-                progress.ResponseTimeMs = 95;
-                progress.ReleaseTimeMs = 420;
-                progress.PeakHoldMilliseconds = 160;
-                break;
-
             default:
                 progress.UseAsymmetricBallistics = true;
                 progress.ResponseTimeMs = SPECTRUM_ATTACK_MS;
@@ -1317,6 +1472,10 @@ public partial class FormAudioSpectrum : Form
 
         _advancedVisualizer?.Dispose();
         _advancedVisualizer = null;
+        _waveVisualizer?.Dispose();
+        _waveVisualizer = null;
+        _ambientParticleField?.Dispose();
+        _ambientParticleField = null;
 
         if (_axisLabels != null)
         {
