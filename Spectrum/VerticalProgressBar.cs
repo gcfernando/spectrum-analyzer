@@ -16,10 +16,10 @@ public sealed class VerticalProgressBar : ProgressBar
     private static readonly object s_lock = new();
     private static volatile System.Windows.Forms.Timer s_timer;
 
-    private static readonly Color s_inactiveBrickColor   = Color.FromArgb(30, 255, 255, 255);
-    private static readonly Color s_inactiveDotColor     = Color.FromArgb(20, 255, 255, 255);
-    private static readonly Color s_inactiveSpectrumColor = Color.FromArgb(16, 255, 255, 255);
-    private static readonly Color s_waveBackgroundColor  = Color.FromArgb(18, 255, 255, 255);
+    private Color _inactiveBrickColor = Color.FromArgb(42, 58, 70);
+    private Color _inactiveDotColor = Color.FromArgb(52, 58, 70);
+    private Color _inactiveSpectrumColor = Color.FromArgb(30, 58, 70);
+    private Color _waveBackgroundColor = Color.FromArgb(24, 58, 70);
     private static readonly List<WeakReference<VerticalProgressBar>> s_instances = new(128);
 
     private static readonly Stopwatch s_stopwatch = Stopwatch.StartNew();
@@ -35,7 +35,6 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private int _lastDisplayQ = int.MinValue;
     private int _lastPeakQ = int.MinValue;
-    private int _lastAnimQ = int.MinValue;
     private VisualizationMode _lastModeQ = (VisualizationMode)(-1);
 
     private readonly List<Rectangle> _brickRects = new(256);
@@ -130,9 +129,6 @@ public sealed class VerticalProgressBar : ProgressBar
     private static bool ModeHasPeakMarker(VisualizationMode mode)
         => mode is not VisualizationMode.Center and not VisualizationMode.Mirror;
 
-    private static bool ModeHasTimeAnimation(VisualizationMode mode, VisualStyle style)
-        => mode == VisualizationMode.Wave || style == VisualStyle.Pulse;
-
     private VisualStyle _style;
 
     internal VisualStyle VisualStyle
@@ -144,7 +140,6 @@ public sealed class VerticalProgressBar : ProgressBar
                 return;
 
             _style = value;
-            _lastAnimQ = int.MinValue;
             Invalidate();
         }
     }
@@ -337,6 +332,21 @@ public sealed class VerticalProgressBar : ProgressBar
         UpdateStyles();
     }
 
+    internal void ApplyThemeChrome(VisualTheme theme)
+    {
+        BackColor = theme.VisualizationSurface;
+        ForeColor = theme.PrimaryText;
+        _inactiveBrickColor = Color.FromArgb(120, theme.InactiveSignal);
+        _inactiveDotColor = Color.FromArgb(155, theme.InactiveSignal);
+        _inactiveSpectrumColor = Color.FromArgb(96, theme.InactiveSignal);
+        _waveBackgroundColor = Color.FromArgb(72, theme.InactiveSignal);
+        _borderPen.Color = theme.Frame;
+        _innerEdgePen.Color = Color.FromArgb(80, theme.Divider);
+        _highlightPen.Color = Color.FromArgb(122, theme.PrimaryText);
+        _gridlinePen.Color = Color.FromArgb(94, theme.Grid);
+        Invalidate();
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -384,7 +394,6 @@ public sealed class VerticalProgressBar : ProgressBar
 
         _lastDisplayQ = int.MinValue;
         _lastPeakQ = int.MinValue;
-        _lastAnimQ = int.MinValue;
         _lastModeQ = (VisualizationMode)(-1);
 
         Invalidate();
@@ -483,6 +492,12 @@ public sealed class VerticalProgressBar : ProgressBar
 
         if (VisualStyle == VisualStyle.Glow)
             DrawStyleGlow(e.Graphics, innerX, innerW, topInner, bottomInner, filledH, fillPercent);
+        else if (VisualStyle == VisualStyle.Trail)
+            DrawStyleTrail(e.Graphics, innerX, innerW, topInner, bottomInner, innerH, range);
+        else if (VisualStyle == VisualStyle.Scanline)
+            DrawStyleScanline(e.Graphics, innerX, innerW, topInner, innerH, fillPercent);
+        else if (VisualStyle == VisualStyle.Precision)
+            DrawPrecisionGrid(e.Graphics, innerX, innerW, topInner, bottomInner, innerH);
 
         // Hide the peak marker at the floor to avoid a row of markers during silence.
         if (PeakHoldEnabled && ModeHasPeakMarker(mode) && _peakValue > Minimum + 0.5f)
@@ -550,7 +565,7 @@ public sealed class VerticalProgressBar : ProgressBar
             }
             else
             {
-                _workBrush.Color = s_inactiveBrickColor;
+                _workBrush.Color = _inactiveBrickColor;
                 g.FillRectangle(_workBrush, brickRect);
             }
         }
@@ -568,9 +583,9 @@ public sealed class VerticalProgressBar : ProgressBar
 
             _workBrush.Color = isActive
                 ? (HeatmapEnabled ? _brickHeatColors[i] : (ForeColor.IsEmpty ? Color.LimeGreen : ForeColor))
-                : s_inactiveDotColor;
+                : _inactiveDotColor;
 
-            var dotSize = GetDotSizeFromBrick(rect);
+            var dotSize = Math.Min(Math.Min(rect.Width, rect.Height), GetDotSizeFromBrick(rect) + (isActive ? 1 : 0));
             var x = rect.X + ((rect.Width - dotSize) / 2);
             var y = rect.Y + ((rect.Height - dotSize) / 2);
             g.FillEllipse(_workBrush, x, y, dotSize, dotSize);
@@ -591,7 +606,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
             _workBrush.Color = i < _litBricks
                 ? (HeatmapEnabled ? _brickHeatColors[i] : (ForeColor.IsEmpty ? Color.LimeGreen : ForeColor))
-                : s_inactiveDotColor;
+                : _inactiveDotColor;
 
             g.FillEllipse(_workBrush, x, y, cellSize, cellSize);
         }
@@ -636,7 +651,7 @@ public sealed class VerticalProgressBar : ProgressBar
             }
             else
             {
-                _workBrush.Color = s_inactiveBrickColor;
+                _workBrush.Color = _inactiveBrickColor;
                 g.FillRectangle(_workBrush, brickRect);
             }
         }
@@ -675,7 +690,7 @@ public sealed class VerticalProgressBar : ProgressBar
             }
             else
             {
-                _workBrush.Color = s_inactiveBrickColor;
+                _workBrush.Color = _inactiveBrickColor;
                 g.FillRectangle(_workBrush, brickRect);
             }
         }
@@ -683,7 +698,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private void DrawMode_Wave(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH, float fillPercent)
     {
-        _workBrush.Color = s_waveBackgroundColor;
+        _workBrush.Color = _waveBackgroundColor;
         g.FillRectangle(_workBrush, new Rectangle(innerX, topInner, innerW, innerH));
 
         var filledH = (int)Math.Round(innerH * fillPercent);
@@ -695,11 +710,8 @@ public sealed class VerticalProgressBar : ProgressBar
         _workBrush.Color = Color.FromArgb(120, baseColor.R, baseColor.G, baseColor.B);
         g.FillRectangle(_workBrush, fillRect);
 
-        var t = (float)s_stopwatch.Elapsed.TotalSeconds;
-
         var amp = Math.Max(1f, innerW * 0.22f * (0.25f + (0.75f * fillPercent)));
-        var freq = 2.2f;
-        var phase = t * (float)(Math.PI * 2) * freq;
+        var phase = fillPercent * (float)Math.PI;
 
         var points = Math.Min(_wavePoints.Length, Math.Max(12, fillRect.Height / 4));
         var midX = innerX + (innerW / 2);
@@ -752,21 +764,16 @@ public sealed class VerticalProgressBar : ProgressBar
         if (fillHeight <= 0)
             return;
 
-        // Layer translucent bands inside the control to create a themed halo around the bright core.
+        // Keep the emphasis at the active edge so Glow never becomes a second filled visualization.
         var color = GetLevelColor(fillPercent);
-        _glowOuterBrush.Color = Color.FromArgb(24, color);
-        _glowMiddleBrush.Color = Color.FromArgb(66, color);
-        _glowCoreBrush.Color = Color.FromArgb(224, color);
+        _glowOuterBrush.Color = Color.FromArgb(36, color);
+        _glowMiddleBrush.Color = Color.FromArgb(76, color);
+        _glowCoreBrush.Color = Color.FromArgb(180, color);
 
-        g.FillRectangle(_glowOuterBrush, innerX, fillTop, innerW, fillHeight);
-
-        if (innerW > 2)
-            g.FillRectangle(_glowMiddleBrush, innerX + 1, fillTop, innerW - 2, fillHeight);
-
-        if (innerW > 4)
-            g.FillRectangle(_glowCoreBrush, innerX + 2, fillTop, innerW - 4, fillHeight);
-        else
-            g.FillRectangle(_glowCoreBrush, innerX, fillTop, innerW, fillHeight);
+        g.FillRectangle(_glowOuterBrush, innerX, fillTop, innerW, Math.Min(3, fillHeight));
+        if (fillHeight > 1)
+            g.FillRectangle(_glowMiddleBrush, innerX + 1, fillTop, Math.Max(1, innerW - 2), Math.Min(2, fillHeight));
+        g.FillRectangle(_glowCoreBrush, innerX + 2, fillTop, Math.Max(1, innerW - 4), 1);
     }
 
     private void DrawMode_Lollipop(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH, float fillPercent)
@@ -825,13 +832,49 @@ public sealed class VerticalProgressBar : ProgressBar
         }
     }
 
+    private void DrawStyleTrail(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH, float range)
+    {
+        if (_peakValue <= Minimum + 0.5f)
+            return;
+
+        var percent = Clamp01((_peakValue - Minimum) / range);
+        var y = bottomInner - (int)Math.Round(percent * innerH);
+        if (y < topInner || y > bottomInner)
+            return;
+
+        using var pen = new Pen(Color.FromArgb(110, GetLevelColor(percent)), 1f);
+        g.DrawLine(pen, innerX, y, innerX + innerW - 1, y);
+    }
+
+    private void DrawStyleScanline(Graphics g, int innerX, int innerW, int topInner, int innerH, float fillPercent)
+    {
+        var y = topInner + (int)Math.Round((1f - fillPercent) * Math.Max(0, innerH - 1));
+        using var pen = new Pen(Color.FromArgb(80, HeatHighColor), 1f);
+        g.DrawLine(pen, innerX, y, innerX + innerW - 1, y);
+    }
+
+    private void DrawPrecisionGrid(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH)
+    {
+        var levels = GridlineLevels;
+        if (levels == null)
+            return;
+
+        using var pen = new Pen(Color.FromArgb(160, _gridlinePen.Color), 1f);
+        foreach (var level in levels)
+        {
+            var y = bottomInner - (int)Math.Round(Clamp01(level) * innerH);
+            if (y >= topInner && y <= bottomInner)
+                g.DrawLine(pen, innerX, y, innerX + innerW, y);
+        }
+    }
+
     // Lighten the peak-height fill color so the marker stands out against the fill below it.
     private Color GetPeakColor(float peakPercent)
     {
         if (!PeakColorMatchesHeat) return PeakLineColor;
 
         var heat = GetLevelColor(peakPercent);
-        return LerpRgb(heat, Color.White, 0.5f);
+        return LerpRgb(heat, Color.White, 0.25f);
     }
 
     private void DrawPeakMarker_Line(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH, float range)
@@ -991,8 +1034,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
         if (VisualStyle == VisualStyle.Pulse)
         {
-            var phase = (float)Math.Sin(s_stopwatch.Elapsed.TotalSeconds * Math.PI * 2.0);
-            c = LerpRgb(c, Color.White, 0.10f + (0.18f * ((phase + 1f) / 2f)));
+            c = LerpRgb(c, Color.White, 0.08f + (0.20f * Clamp01(level01)));
         }
 
         return c;
@@ -1067,19 +1109,13 @@ public sealed class VerticalProgressBar : ProgressBar
     {
         var dq = ComputeRenderKey(mode, out var pq, out var filledH);
 
-        var aq = 0;
-        if (ModeHasTimeAnimation(mode, VisualStyle) && filledH > 0)
-            aq = (int)(s_stopwatch.ElapsedMilliseconds / 33L);
-
         var changed =
             dq != _lastDisplayQ ||
             pq != _lastPeakQ ||
-            aq != _lastAnimQ ||
             mode != _lastModeQ;
 
         _lastDisplayQ = dq;
         _lastPeakQ = pq;
-        _lastAnimQ = aq;
         _lastModeQ = mode;
 
         return changed;

@@ -6,6 +6,7 @@ using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using Spectrum;
 
 #endregion Imports
 #region RoundRectangle
@@ -372,9 +373,30 @@ public class Ambiance_ThemeContainer : ContainerControl
 
     private LinearGradientBrush _bodyGradientBrush;
     private Size _bodyGradientSize;
+    private Color _headerStart = Color.FromArgb(68, 64, 54);
+    private Color _headerEnd = Color.FromArgb(38, 35, 29);
+    private Color _bodyStart = Color.FromArgb(18, 18, 18);
+    private Color _bodyEnd = Color.FromArgb(8, 8, 8);
 
     /// <summary>Right edge available to the title after header controls are laid out.</summary>
     public int TitleRightInset { get; set; }
+
+    internal void ApplyTheme(VisualTheme theme)
+    {
+        BackColor = theme.Canvas;
+        _headerStart = theme.HeaderStart;
+        _headerEnd = theme.HeaderEnd;
+        _bodyStart = theme.Surface;
+        _bodyEnd = theme.Canvas;
+        _outerBorderPen.Color = theme.Frame;
+        _separatorBrush.Color = theme.Divider;
+        _titleBrush.Color = theme.PrimaryText;
+        _headerBrush?.Dispose();
+        _headerBrush = null;
+        _bodyGradientBrush?.Dispose();
+        _bodyGradientBrush = null;
+        Invalidate();
+    }
 
     protected override void CreateHandle() => base.CreateHandle();
 
@@ -415,8 +437,8 @@ public class Ambiance_ThemeContainer : ContainerControl
             _headerBrush?.Dispose();
             _headerBrush = new LinearGradientBrush(
                 new Rectangle(1, 1, Math.Max(1, Width - 2), 36),
-                Color.FromArgb(68, 64, 54),
-                Color.FromArgb(38, 35, 29),
+                _headerStart,
+                _headerEnd,
                 LinearGradientMode.Vertical);
             _headerBrushWidth = Width;
         }
@@ -432,8 +454,8 @@ public class Ambiance_ThemeContainer : ContainerControl
                 _bodyGradientBrush?.Dispose();
                 _bodyGradientBrush = new LinearGradientBrush(
                     bodyRect,
-                    Color.FromArgb(18, 18, 18),
-                    Color.FromArgb(8, 8, 8),
+                    _bodyStart,
+                    _bodyEnd,
                     LinearGradientMode.Vertical);
                 _bodyGradientSize = bodyRect.Size;
             }

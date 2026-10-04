@@ -138,6 +138,7 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="VisualizerPreferences.cs" />
+    <Compile Include="VisualTheme.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="FormAudioSpectrum.resx">
       <DependentUpon>FormAudioSpectrum.cs</DependentUpon>

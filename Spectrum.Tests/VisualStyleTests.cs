@@ -1,6 +1,5 @@
 using System;
 using System.Configuration;
-using System.Linq;
 using System.Reflection;
 using Spectrum;
 using Xunit;
@@ -19,7 +18,7 @@ public class VisualStyleTests
     }
 
     [Theory]
-    [InlineData("Pulse", "Bricks", "Pulse")]
+    [InlineData("Pulse", "Bricks", "None")]
     [InlineData("Glow", "Spectrum", "Glow")]
     public void LegacyModesMigrateToDeterministicBaseAndStyle(string legacyMode, string expectedMode, string expectedStyle)
     {
@@ -30,21 +29,28 @@ public class VisualStyleTests
     }
 
     [Fact]
-    public void UnsupportedModesShowNoAppliedStyleWithoutDiscardingMigrationIntent()
+    public void LegacyModeStyleMigrationNormalizesToItsSupportedStyleSet()
     {
         FormAudioSpectrum.ResolveConfiguredVisualState("Pulse", null, out var mode, out var style);
 
-        Assert.False(FormAudioSpectrum.IsVisualStyleSupported(mode));
-        Assert.Equal("Pulse", style);
+        Assert.True(FormAudioSpectrum.IsVisualStyleSupported(mode));
+        Assert.Equal("None", style);
         Assert.Equal("None", FormAudioSpectrum.GetAppliedVisualStyle(mode, style));
+    }
+
+    [Fact]
+    public void LedDisallowsGlowAndExposesOnlyItsSupportedStyles()
+    {
+        Assert.Equal("None", FormAudioSpectrum.GetAppliedVisualStyle("LED", "Glow"));
+        Assert.Equal(new[] { "None", "Pulse", "Scanline", "Precision" }, VisualStyles.GetSupportedNames("LED"));
     }
 
     [Theory]
     [InlineData("Spectrum", true)]
     [InlineData("LED", true)]
     [InlineData("Wave", true)]
-    [InlineData("Bricks", false)]
-    [InlineData("Contour", false)]
+    [InlineData("Bricks", true)]
+    [InlineData("Contour", true)]
     public void StylesAreAvailableOnlyForSupportedBases(string mode, bool supported)
     {
         Assert.Equal(supported, FormAudioSpectrum.IsVisualStyleSupported(mode));
@@ -63,9 +69,41 @@ public class VisualStyleTests
     [Fact]
     public void StyleSelectorChoicesIncludeSafeDefaultAndOnlyStyles()
     {
-        Assert.Equal(new[] { "None", "Pulse", "Glow" }, VisualStyles.Names);
+        Assert.Equal(new[] { "None", "Pulse", "Glow", "Trail", "Scanline", "Precision" }, VisualStyles.Names);
         Assert.DoesNotContain("Pulse", GetVisualModes());
         Assert.DoesNotContain("Glow", GetVisualModes());
+    }
+
+    [Theory]
+    [InlineData("Peak Trace")]
+    [InlineData("Threshold Monitor")]
+    [InlineData("Band Matrix")]
+    [InlineData("Octave Spectrum")]
+    [InlineData("Spectral Flux")]
+    [InlineData("Orbit History")]
+    [InlineData("Octave Waterfall")]
+    [InlineData("Transient Map")]
+    [InlineData("Frequency Ribbon")]
+    public void NewModesAreExposedAndHaveValidStyleChoices(string mode)
+    {
+        Assert.Contains(mode, GetVisualModes());
+        Assert.Contains("None", VisualStyles.GetSupportedNames(mode));
+        Assert.Contains("Trail", VisualStyles.GetSupportedNames(mode));
+        Assert.Contains("Scanline", VisualStyles.GetSupportedNames(mode));
+        Assert.Contains("Precision", VisualStyles.GetSupportedNames(mode));
+    }
+
+    [Theory]
+    [InlineData("Spectrum", "Glow")]
+    [InlineData("LED", "Pulse")]
+    [InlineData("Band Matrix", "Trail")]
+    [InlineData("Bricks", "Precision")]
+    public void RandomStyleSelectionReturnsAnotherValidStyle(string mode, string currentStyle)
+    {
+        var next = FormAudioSpectrum.GetDifferentRandomStyle(mode, currentStyle, new Random(42));
+
+        Assert.Contains(next, VisualStyles.GetSupportedNames(mode));
+        Assert.NotEqual(currentStyle, next);
     }
 
     private static string[] GetVisualModes() =>

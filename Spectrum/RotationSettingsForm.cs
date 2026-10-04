@@ -12,8 +12,9 @@ internal sealed class RotationSettingsForm : Form
     private readonly Font _formFont = new("Segoe UI", 9f);
     private readonly Font _headingFont;
 
-    public RotationSettingsForm(bool randomEnabled, int intervalMinutes)
+    public RotationSettingsForm(bool randomEnabled, int intervalMinutes, BarColorTheme theme)
     {
+        var ui = theme.Ui;
         Text = "Mode and Theme Rotation";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
@@ -21,8 +22,8 @@ internal sealed class RotationSettingsForm : Form
         MaximizeBox = false;
         ShowInTaskbar = false;
         ClientSize = new Size(380, 246);
-        BackColor = Color.FromArgb(25, 29, 35);
-        ForeColor = Color.FromArgb(230, 236, 243);
+        BackColor = ui.Surface;
+        ForeColor = ui.PrimaryText;
         Font = _formFont;
         _headingFont = new Font("Segoe UI Semibold", 11f, FontStyle.Bold);
 
@@ -33,7 +34,7 @@ internal sealed class RotationSettingsForm : Form
             Font = _headingFont,
             Location = new Point(20, 14),
             Size = new Size(330, 26),
-            ForeColor = Color.FromArgb(242, 245, 249)
+            ForeColor = ui.PrimaryText
         };
 
         var subtitle = new Label
@@ -42,12 +43,12 @@ internal sealed class RotationSettingsForm : Form
             Text = "Choose how the visualization changes while audio is playing.",
             Location = new Point(21, 43),
             Size = new Size(338, 28),
-            ForeColor = Color.FromArgb(162, 174, 188)
+            ForeColor = ui.SecondaryText
         };
 
         var accent = new Panel
         {
-            BackColor = Color.FromArgb(88, 195, 211),
+            BackColor = ui.Focus,
             Location = new Point(20, 76),
             Size = new Size(340, 1)
         };
@@ -56,7 +57,7 @@ internal sealed class RotationSettingsForm : Form
         {
             AutoSize = true,
             Text = "Fixed",
-            ForeColor = Color.FromArgb(232, 238, 245),
+            ForeColor = ui.PrimaryText,
             Location = new Point(22, 87),
             Checked = !randomEnabled
         };
@@ -67,14 +68,14 @@ internal sealed class RotationSettingsForm : Form
             Text = "Keep your selected mode and theme unchanged.",
             Location = new Point(45, 108),
             Size = new Size(300, 20),
-            ForeColor = Color.FromArgb(162, 174, 188)
+            ForeColor = ui.SecondaryText
         };
 
         _randomOption = new RadioButton
         {
             AutoSize = true,
             Text = "Timed random",
-            ForeColor = Color.FromArgb(232, 238, 245),
+            ForeColor = ui.PrimaryText,
             Location = new Point(22, 132),
             Checked = randomEnabled
         };
@@ -85,7 +86,7 @@ internal sealed class RotationSettingsForm : Form
             Text = "Automatically select a new mode and theme together.",
             Location = new Point(45, 153),
             Size = new Size(320, 20),
-            ForeColor = Color.FromArgb(162, 174, 188)
+            ForeColor = ui.SecondaryText
         };
 
         var intervalLabel = new Label
@@ -93,7 +94,7 @@ internal sealed class RotationSettingsForm : Form
             AutoSize = true,
             Text = "Change every",
             Location = new Point(45, 184),
-            ForeColor = Color.FromArgb(195, 205, 216)
+            ForeColor = ui.SecondaryText
         };
 
         _interval = new NumericUpDown
@@ -103,8 +104,8 @@ internal sealed class RotationSettingsForm : Form
             Value = Math.Max(1, Math.Min(240, intervalMinutes)),
             Location = new Point(132, 180),
             Size = new Size(62, 25),
-            BackColor = Color.FromArgb(37, 44, 53),
-            ForeColor = Color.FromArgb(242, 245, 249)
+            BackColor = ui.ControlSurface,
+            ForeColor = ui.PrimaryText
         };
 
         var minutesLabel = new Label
@@ -112,7 +113,7 @@ internal sealed class RotationSettingsForm : Form
             AutoSize = true,
             Text = "minutes",
             Location = new Point(200, 184),
-            ForeColor = Color.FromArgb(195, 205, 216)
+            ForeColor = ui.SecondaryText
         };
 
         var cancelButton = new Button
@@ -122,10 +123,10 @@ internal sealed class RotationSettingsForm : Form
             Location = new Point(194, 208),
             Size = new Size(78, 28),
             FlatStyle = FlatStyle.Flat,
-            BackColor = Color.FromArgb(37, 44, 53),
-            ForeColor = Color.FromArgb(225, 232, 240)
+            BackColor = ui.ControlSurface,
+            ForeColor = ui.PrimaryText
         };
-        cancelButton.FlatAppearance.BorderColor = Color.FromArgb(71, 82, 96);
+        cancelButton.FlatAppearance.BorderColor = ui.Divider;
 
         var applyButton = new Button
         {
@@ -134,10 +135,10 @@ internal sealed class RotationSettingsForm : Form
             Location = new Point(280, 208),
             Size = new Size(80, 28),
             FlatStyle = FlatStyle.Flat,
-            BackColor = Color.FromArgb(46, 111, 132),
-            ForeColor = Color.White
+            BackColor = ui.Selection,
+            ForeColor = ui.PrimaryText
         };
-        applyButton.FlatAppearance.BorderColor = Color.FromArgb(83, 181, 199);
+        applyButton.FlatAppearance.BorderColor = ui.Focus;
 
         Controls.AddRange(new Control[]
         {

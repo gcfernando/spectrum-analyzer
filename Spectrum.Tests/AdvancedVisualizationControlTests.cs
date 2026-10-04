@@ -21,7 +21,16 @@ public class AdvancedVisualizationControlTests
                 AdvancedVisualizationMode.Waterfall,
                 AdvancedVisualizationMode.RadialSpectrum,
                 AdvancedVisualizationMode.Contour,
-                AdvancedVisualizationMode.NoteMap
+                AdvancedVisualizationMode.NoteMap,
+                AdvancedVisualizationMode.PeakTrace,
+                AdvancedVisualizationMode.ThresholdMonitor,
+                AdvancedVisualizationMode.BandMatrix,
+                AdvancedVisualizationMode.OctaveSpectrum,
+                AdvancedVisualizationMode.SpectralFlux,
+                AdvancedVisualizationMode.OrbitHistory,
+                AdvancedVisualizationMode.OctaveWaterfall,
+                AdvancedVisualizationMode.TransientMap,
+                AdvancedVisualizationMode.FrequencyRibbon
             };
             var values = new byte[AdvancedVisualizationControl.BandCount];
             for (var i = 0; i < values.Length; i++)
@@ -63,6 +72,42 @@ public class AdvancedVisualizationControlTests
             using var bitmap = new Bitmap(control.Width, control.Height);
             control.DrawToBitmap(bitmap, new Rectangle(Point.Empty, control.Size));
             Assert.True(CountNonBackgroundPixels(bitmap, control.BackColor) > 0);
+        });
+    }
+
+    [Fact]
+    public void EveryExposedAdvancedModeStyleThemeCombinationRenders()
+    {
+        RunOnSta(() =>
+        {
+            var modes = new[]
+            {
+                AdvancedVisualizationMode.Waterfall, AdvancedVisualizationMode.RadialSpectrum, AdvancedVisualizationMode.Contour,
+                AdvancedVisualizationMode.PeakTrace, AdvancedVisualizationMode.ThresholdMonitor, AdvancedVisualizationMode.BandMatrix,
+                AdvancedVisualizationMode.OctaveSpectrum, AdvancedVisualizationMode.SpectralFlux, AdvancedVisualizationMode.OrbitHistory,
+                AdvancedVisualizationMode.OctaveWaterfall, AdvancedVisualizationMode.TransientMap, AdvancedVisualizationMode.FrequencyRibbon
+            };
+            var values = new byte[AdvancedVisualizationControl.BandCount];
+            for (var band = 0; band < values.Length; band++)
+                values[band] = (byte)(1 + ((band * 254) / (values.Length - 1)));
+
+            using var control = new AdvancedVisualizationControl { Size = new Size(220, 120) };
+            foreach (var mode in modes)
+            {
+                foreach (var theme in BarColorThemes.Names)
+                {
+                    foreach (var styleName in VisualStyles.GetSupportedNames(GetModeName(mode)))
+                    {
+                        control.Mode = mode;
+                        control.Style = VisualStyles.Parse(styleName);
+                        control.SetSpectrum(values, theme, mode);
+                        using var bitmap = new Bitmap(control.Width, control.Height);
+                        control.DrawToBitmap(bitmap, new Rectangle(Point.Empty, control.Size));
+                        Assert.True(CountNonBackgroundPixels(bitmap, control.BackColor) > 0,
+                            $"{mode} / {styleName} / {theme} should render.");
+                    }
+                }
+            }
         });
     }
 
@@ -217,6 +262,21 @@ public class AdvancedVisualizationControlTests
         BrickPadding = 1,
         GridlineLevels = Array.Empty<float>(),
         PeakHoldEnabled = false
+    };
+
+    private static string GetModeName(AdvancedVisualizationMode mode) => mode switch
+    {
+        AdvancedVisualizationMode.RadialSpectrum => "Radial Spectrum",
+        AdvancedVisualizationMode.PeakTrace => "Peak Trace",
+        AdvancedVisualizationMode.ThresholdMonitor => "Threshold Monitor",
+        AdvancedVisualizationMode.BandMatrix => "Band Matrix",
+        AdvancedVisualizationMode.OctaveSpectrum => "Octave Spectrum",
+        AdvancedVisualizationMode.SpectralFlux => "Spectral Flux",
+        AdvancedVisualizationMode.OrbitHistory => "Orbit History",
+        AdvancedVisualizationMode.OctaveWaterfall => "Octave Waterfall",
+        AdvancedVisualizationMode.TransientMap => "Transient Map",
+        AdvancedVisualizationMode.FrequencyRibbon => "Frequency Ribbon",
+        _ => mode.ToString()
     };
 
     private static void SetDisplayedLevel(VerticalProgressBar bar, float level)

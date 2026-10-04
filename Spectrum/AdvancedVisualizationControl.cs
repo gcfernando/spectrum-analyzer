@@ -12,7 +12,16 @@ public enum AdvancedVisualizationMode
     Waterfall,
     RadialSpectrum,
     Contour,
-    NoteMap
+    NoteMap,
+    PeakTrace,
+    ThresholdMonitor,
+    BandMatrix,
+    OctaveSpectrum,
+    SpectralFlux,
+    OrbitHistory,
+    OctaveWaterfall,
+    TransientMap,
+    FrequencyRibbon
 }
 
 /// <summary>A reusable 83-band renderer that accepts copied analyzer frames on the UI thread.</summary>
@@ -36,18 +45,19 @@ public sealed class AdvancedVisualizationControl : Control
     };
 
     private readonly byte[] _spectrum = new byte[BandCount];
+    private readonly byte[] _previousSpectrum = new byte[BandCount];
     private byte[] _history;
     private readonly int[] _noteByBand = new int[BandCount];
     private readonly byte[] _noteLevels = new byte[12 * NoteOctaveCount];
     private readonly PointF[] _plotPoints = new PointF[BandCount];
     private readonly SolidBrush[] _levelBrushes = new SolidBrush[256];
-    private readonly Pen _gridPen = new Pen(Color.FromArgb(42, 201, 215, 230), 1f);
-    private readonly Pen _majorGridPen = new Pen(Color.FromArgb(25, 213, 224, 238), 1f);
-    private readonly Pen _linePen = new Pen(Color.White, 1.5f);
-    private readonly Pen _softLinePen = new Pen(Color.FromArgb(52, Color.White), 5f);
-    private readonly Pen _framePen = new Pen(Color.FromArgb(64, 183, 199, 216), 1f);
-    private readonly SolidBrush _contourFillBrush = new SolidBrush(Color.FromArgb(84, 0, 230, 90));
-    private readonly SolidBrush _textBrush = new SolidBrush(Color.FromArgb(201, 216, 230));
+    private readonly Pen _gridPen = new Pen(Color.Empty, 1f);
+    private readonly Pen _majorGridPen = new Pen(Color.Empty, 1f);
+    private readonly Pen _linePen = new Pen(Color.Empty, 1.5f);
+    private readonly Pen _softLinePen = new Pen(Color.Empty, 5f);
+    private readonly Pen _framePen = new Pen(Color.Empty, 1f);
+    private readonly SolidBrush _contourFillBrush = new SolidBrush(Color.Empty);
+    private readonly SolidBrush _textBrush = new SolidBrush(Color.Empty);
     private readonly GraphicsPath _contourPath = new GraphicsPath();
     private readonly StringFormat _centeredText = new StringFormat
     {
@@ -63,6 +73,7 @@ public sealed class AdvancedVisualizationControl : Control
     private string _themeName = "ClassicSmooth";
     private BarColorTheme _theme;
     private BandPlan _bandPlan;
+    private VisualStyle _style;
 
     public AdvancedVisualizationControl()
     {
@@ -71,9 +82,6 @@ public sealed class AdvancedVisualizationControl : Control
                  ControlStyles.OptimizedDoubleBuffer |
                  ControlStyles.ResizeRedraw, true);
 
-        BackColor = Color.FromArgb(38, 35, 29);
-        ForeColor = Color.FromArgb(215, 210, 196);
-
         _history = new byte[DefaultHistoryFrames * BandCount];
         for (var i = 0; i < _levelBrushes.Length; i++)
         {
@@ -81,6 +89,7 @@ public sealed class AdvancedVisualizationControl : Control
         }
 
         _theme = BarColorThemes.Resolve(_themeName);
+        ApplyThemeChrome(_theme);
         UpdatePalette();
         SetBandPlan(BandPlan.CreateLogarithmic(BandCount, 20, 20000, 48000));
     }
@@ -102,6 +111,19 @@ public sealed class AdvancedVisualizationControl : Control
         }
     }
 
+    internal VisualStyle Style
+    {
+        get => _style;
+        set
+        {
+            if (_style == value)
+                return;
+
+            _style = value;
+            Invalidate();
+        }
+    }
+
     /// <summary>Palette name understood by <see cref="BarColorThemes"/>, including Aurora; unknown names use ClassicSmooth.</summary>
     public string ThemeName
     {
@@ -116,6 +138,7 @@ public sealed class AdvancedVisualizationControl : Control
 
             _themeName = name;
             _theme = BarColorThemes.Resolve(name);
+            ApplyThemeChrome(_theme);
             UpdatePalette();
             Invalidate();
         }
@@ -180,6 +203,7 @@ public sealed class AdvancedVisualizationControl : Control
         {
             _themeName = name;
             _theme = BarColorThemes.Resolve(name);
+            ApplyThemeChrome(_theme);
             UpdatePalette();
         }
 
@@ -202,6 +226,7 @@ public sealed class AdvancedVisualizationControl : Control
         CopyAndAppendFrame(values);
         _theme = theme;
         _themeName = "Custom";
+        ApplyThemeChrome(_theme);
         UpdatePalette();
         _mode = parsedMode;
         Invalidate();
@@ -228,6 +253,29 @@ public sealed class AdvancedVisualizationControl : Control
         base.OnForeColorChanged(e);
         _textBrush.Color = ForeColor;
         Invalidate();
+    }
+
+    internal void ApplyTheme(BarColorTheme theme)
+    {
+        _theme = theme;
+        _themeName = "Custom";
+        ApplyThemeChrome(theme);
+        UpdatePalette();
+        Invalidate();
+    }
+
+    private void ApplyThemeChrome(BarColorTheme theme)
+    {
+        var ui = theme.Ui;
+        BackColor = ui.VisualizationSurface;
+        ForeColor = ui.SecondaryText;
+        _gridPen.Color = Color.FromArgb(88, ui.Grid);
+        _majorGridPen.Color = Color.FromArgb(142, ui.MajorGrid);
+        _framePen.Color = Color.FromArgb(180, ui.Frame);
+        _linePen.Color = theme.High;
+        _softLinePen.Color = Color.FromArgb(48, theme.High);
+        _contourFillBrush.Color = Color.FromArgb(62, theme.Mid);
+        _textBrush.Color = ui.SecondaryText;
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -262,7 +310,36 @@ public sealed class AdvancedVisualizationControl : Control
                 case AdvancedVisualizationMode.NoteMap:
                     PaintNoteMap(graphics, width, height);
                     break;
+                case AdvancedVisualizationMode.PeakTrace:
+                    PaintPeakTrace(graphics, width, height);
+                    break;
+                case AdvancedVisualizationMode.ThresholdMonitor:
+                    PaintThresholdMonitor(graphics, width, height);
+                    break;
+                case AdvancedVisualizationMode.BandMatrix:
+                    PaintBandMatrix(graphics, width, height, false);
+                    break;
+                case AdvancedVisualizationMode.OctaveSpectrum:
+                    PaintOctaveSpectrum(graphics, width, height);
+                    break;
+                case AdvancedVisualizationMode.SpectralFlux:
+                    PaintSpectralFlux(graphics, width, height);
+                    break;
+                case AdvancedVisualizationMode.OrbitHistory:
+                    PaintOrbitHistory(graphics, width, height);
+                    break;
+                case AdvancedVisualizationMode.OctaveWaterfall:
+                    PaintOctaveWaterfall(graphics, width, height);
+                    break;
+                case AdvancedVisualizationMode.TransientMap:
+                    PaintBandMatrix(graphics, width, height, true);
+                    break;
+                case AdvancedVisualizationMode.FrequencyRibbon:
+                    PaintFrequencyRibbon(graphics, width, height);
+                    break;
             }
+
+            PaintStyleOverlay(graphics, width, height);
 
             if (width > 2 && height > 2)
             {
@@ -503,6 +580,228 @@ public sealed class AdvancedVisualizationControl : Control
         }
     }
 
+    private void PaintPeakTrace(Graphics graphics, int width, int height)
+    {
+        DrawContourGrid(graphics, width, height, out var top, out var baseline);
+        var frames = Math.Min(6, _historyCount);
+        for (var age = frames - 1; age >= 0; age--)
+        {
+            var frame = GetHistoryFrame(age);
+            if (frame < 0)
+                continue;
+
+            var alpha = 28 + ((frames - age) * 22);
+            DrawSpectrumLine(graphics, width, top, baseline, frame * BandCount, Color.FromArgb(alpha, _theme.Mid), 1f);
+        }
+
+        DrawSpectrumLine(graphics, width, top, baseline, -1, _theme.High, 2f);
+    }
+
+    private void PaintThresholdMonitor(Graphics graphics, int width, int height)
+    {
+        const byte threshold = 170;
+        var cellWidth = Math.Max(1f, width / (float)BandCount);
+        var thresholdY = (int)Math.Round(height * (1f - (threshold / 255f)));
+        for (var band = 0; band < BandCount; band++)
+        {
+            var level = _spectrum[band];
+            var color = level >= threshold ? _theme.High : level >= 96 ? _theme.Mid : _theme.Low;
+            var cellHeight = Math.Max(1f, height * level / 255f);
+            using var brush = new SolidBrush(color);
+            graphics.FillRectangle(brush, band * cellWidth, height - cellHeight, cellWidth - 1f, cellHeight);
+        }
+
+        graphics.DrawLine(_majorGridPen, 0, thresholdY, width, thresholdY);
+    }
+
+    private void PaintBandMatrix(Graphics graphics, int width, int height, bool showFlux)
+    {
+        const int columns = 12;
+        var rows = (int)Math.Ceiling(BandCount / (double)columns);
+        var cellWidth = width / (float)columns;
+        var cellHeight = height / (float)rows;
+        for (var band = 0; band < BandCount; band++)
+        {
+            var column = band % columns;
+            var row = band / columns;
+            var value = showFlux ? Math.Abs(_spectrum[band] - _previousSpectrum[band]) : _spectrum[band];
+            var rect = new RectangleF(column * cellWidth, row * cellHeight, cellWidth, cellHeight);
+            graphics.FillRectangle(_levelBrushes[value], rect);
+            graphics.DrawRectangle(_gridPen, rect.X, rect.Y, rect.Width, rect.Height);
+        }
+    }
+
+    private void PaintOctaveSpectrum(Graphics graphics, int width, int height)
+        {
+            const int groups = 10;
+            var groupWidth = width / (float)groups;
+            for (var group = 0; group < groups; group++)
+            {
+                var level = GetGroupLevel(_spectrum, group, groups);
+                var barHeight = Math.Max(1f, height * level / 255f);
+                var x = group * groupWidth;
+                graphics.FillRectangle(_levelBrushes[level], x + 1f, height - barHeight, Math.Max(1f, groupWidth - 2f), barHeight);
+                graphics.DrawRectangle(_majorGridPen, x, 0, Math.Max(1f, groupWidth - 1f), height - 1f);
+            }
+        }
+
+    private void PaintSpectralFlux(Graphics graphics, int width, int height)
+        {
+            var columnWidth = Math.Max(1f, width / (float)BandCount);
+            for (var band = 0; band < BandCount; band++)
+            {
+                var flux = Math.Abs(_spectrum[band] - _previousSpectrum[band]);
+                var barHeight = Math.Max(1f, height * flux / 255f);
+                graphics.FillRectangle(_levelBrushes[flux], band * columnWidth, height - barHeight, Math.Max(1f, columnWidth - 1f), barHeight);
+            }
+        }
+
+    private void PaintOrbitHistory(Graphics graphics, int width, int height)
+        {
+            var centerX = width * 0.5f;
+            var centerY = height * 0.5f;
+            var radius = Math.Max(1f, Math.Min(width, height) * 0.44f);
+            var frames = Math.Min(4, _historyCount);
+            for (var age = frames - 1; age >= 0; age--)
+            {
+                var frame = GetHistoryFrame(age);
+                if (frame < 0)
+                    continue;
+
+                var radialOffset = age * Math.Max(2f, radius * 0.06f);
+                var alpha = 48 + ((frames - age) * 40);
+                for (var band = 0; band < BandCount; band++)
+                {
+                    var angle = ((Math.PI * 2.0 * band) / BandCount) - (Math.PI / 2.0);
+                    var level = _history[(frame * BandCount) + band] / 255f;
+                    var start = radius * 0.20f + radialOffset;
+                    var end = start + (level * (radius * 0.72f - radialOffset));
+                    _linePen.Color = Color.FromArgb(alpha, _levelBrushes[_history[(frame * BandCount) + band]].Color);
+                    _linePen.Width = Math.Max(1f, radius / 70f);
+                    graphics.DrawLine(_linePen,
+                        centerX + ((float)Math.Cos(angle) * start), centerY + ((float)Math.Sin(angle) * start),
+                        centerX + ((float)Math.Cos(angle) * end), centerY + ((float)Math.Sin(angle) * end));
+                }
+            }
+        }
+
+    private void PaintOctaveWaterfall(Graphics graphics, int width, int height)
+        {
+            const int groups = 10;
+            var rows = Math.Min(_historyCount, Math.Max(1, height));
+            if (rows == 0)
+                return;
+
+            var cellWidth = width / (float)groups;
+            var cellHeight = height / (float)rows;
+            for (var row = 0; row < rows; row++)
+            {
+                var frame = GetHistoryFrame(rows - row - 1);
+                if (frame < 0)
+                    continue;
+
+                for (var group = 0; group < groups; group++)
+                {
+                    var level = GetGroupLevel(_history, group, groups, frame * BandCount);
+                    graphics.FillRectangle(_levelBrushes[level], group * cellWidth, row * cellHeight, cellWidth + 1f, cellHeight + 1f);
+                }
+            }
+        }
+
+    private void PaintFrequencyRibbon(Graphics graphics, int width, int height)
+        {
+            DrawContourGrid(graphics, width, height, out var top, out var baseline);
+            var frames = Math.Min(5, _historyCount);
+            for (var age = frames - 1; age >= 0; age--)
+            {
+                var frame = GetHistoryFrame(age);
+                if (frame < 0)
+                    continue;
+
+                var offset = age * Math.Max(1f, height * 0.025f);
+                DrawSpectrumLine(graphics, width, top + offset, baseline - offset, frame * BandCount,
+                    Color.FromArgb(40 + ((frames - age) * 35), _theme.Mid), Math.Max(1f, 2.2f - (age * 0.2f)));
+            }
+        }
+
+    private void PaintStyleOverlay(Graphics graphics, int width, int height)
+        {
+            if (_style == VisualStyle.Precision)
+            {
+                using var pen = new Pen(Color.FromArgb(180, _theme.Ui.MajorGrid));
+                for (var guide = 1; guide < 4; guide++)
+                {
+                    var y = height * guide / 4f;
+                    graphics.DrawLine(pen, 0f, y, width, y);
+                }
+            }
+            else if (_style == VisualStyle.Scanline)
+            {
+                var y = height * (1f - GetAverageLevel());
+                using var pen = new Pen(Color.FromArgb(72, _theme.High));
+                graphics.DrawLine(pen, 0f, y, width, y);
+            }
+        }
+
+    private float GetAverageLevel()
+    {
+        var total = 0;
+        for (var band = 0; band < BandCount; band++)
+            total += _spectrum[band];
+
+        return total / (BandCount * 255f);
+    }
+
+    private void DrawContourGrid(Graphics graphics, int width, int height, out float top, out float baseline)
+        {
+            top = Math.Max(2f, height * 0.06f);
+            baseline = Math.Max(top + 1f, height - Math.Max(2f, height * 0.08f));
+            for (var guide = 1; guide <= 3; guide++)
+            {
+                var y = baseline - ((baseline - top) * guide / 4f);
+                graphics.DrawLine(_majorGridPen, 0, y, width, y);
+            }
+        }
+
+    private void DrawSpectrumLine(Graphics graphics, int width, float top, float baseline, int offset, Color color, float thickness)
+        {
+            var plotHeight = Math.Max(1f, baseline - top);
+            for (var band = 0; band < BandCount; band++)
+            {
+                var level = offset < 0 ? _spectrum[band] : _history[offset + band];
+                _plotPoints[band] = new PointF(
+                    (float)band * (width - 1f) / (BandCount - 1),
+                    baseline - ((level / 255f) * plotHeight));
+            }
+
+            _contourPath.Reset();
+            _contourPath.AddCurve(_plotPoints, 0, BandCount - 1, 0.2f);
+            _linePen.Color = color;
+            _linePen.Width = thickness;
+            graphics.DrawPath(_linePen, _contourPath);
+        }
+
+    private int GetHistoryFrame(int age)
+        {
+            if (age < 0 || age >= _historyCount)
+                return -1;
+
+            var frame = _historyWriteIndex - 1 - age;
+            if (frame < 0)
+                frame += _historyFrames;
+            return frame;
+        }
+
+    private static byte GetGroupLevel(byte[] values, int group, int groupCount, int offset = 0)
+        {
+            var start = offset + ((group * BandCount) / groupCount);
+            var end = offset + (((group + 1) * BandCount) / groupCount);
+            byte max = 0;
+            for (var index = start; index < end; index++)
+                max = Math.Max(max, values[index]);
+            return max;
+        }
+
     private void BuildNoteMap(BandPlan plan)
     {
         for (var band = 0; band < BandCount; band++)
@@ -529,6 +828,7 @@ public sealed class AdvancedVisualizationControl : Control
         }
 
         var copyCount = Math.Min(values.Length, BandCount);
+        Array.Copy(_spectrum, _previousSpectrum, _spectrum.Length);
         Array.Clear(_spectrum, 0, _spectrum.Length);
         Array.Copy(values, 0, _spectrum, 0, copyCount);
 
@@ -574,16 +874,19 @@ public sealed class AdvancedVisualizationControl : Control
             return true;
         }
 
+        if (Enum.TryParse(mode?.Replace(" ", string.Empty), true, out AdvancedVisualizationMode parsed))
+        {
+            parsedMode = parsed;
+            return true;
+        }
+
         parsedMode = default;
         return false;
     }
 
     private static void ValidateMode(AdvancedVisualizationMode mode, string parameterName)
     {
-        if (mode != AdvancedVisualizationMode.Waterfall &&
-            mode != AdvancedVisualizationMode.RadialSpectrum &&
-            mode != AdvancedVisualizationMode.Contour &&
-            mode != AdvancedVisualizationMode.NoteMap)
+        if (!Enum.IsDefined(typeof(AdvancedVisualizationMode), mode))
         {
             throw new ArgumentOutOfRangeException(parameterName, mode, "Unknown visualization mode.");
         }
@@ -594,13 +897,15 @@ public sealed class AdvancedVisualizationControl : Control
         for (var level = 0; level < _levelBrushes.Length; level++)
         {
             Color color;
-            if (level < 64)
+            if (level == 0)
             {
-                color = Blend(BackColor, _theme.Low, level / 64f);
+                color = BackColor;
             }
             else
             {
-                var position = (level - 64) / 191f;
+                // The analyzer gates zero separately. Every non-zero display level therefore starts
+                // at the contrast-validated Low token instead of fading into the canvas.
+                var position = (level - 1) / 254f;
                 if (position < (1f / 3f))
                 {
                     color = Blend(_theme.Low, _theme.Mid, position * 3f);

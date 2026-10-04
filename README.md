@@ -7,9 +7,9 @@ A .NET Framework 4.8 Windows Forms application that captures your system's audio
 - **83-bar frequency spectrum** covering 20 Hz – 20 kHz on a logarithmic scale, with a labelled frequency axis (horizontal, bottom) and a labelled level axis (vertical, 0 to -72 dBFS, both sides)
 - **Reference gridlines** at -12/-24/-36/-48/-60 dBFS drawn inside each bar for at-a-glance level reading
 - **Measured band levels** — each bar is the integrated power of its frequency band in dBFS (see *Measurement*)
-- **13 visualization modes** selectable at runtime, with an initial value from `App.config`
-- **Optional Pulse and Glow styles** for Spectrum, LED, and Wave, with a safe `None` default
-- **10 colour themes** selectable at runtime, independent of mode, with an initial value from `App.config`
+- **18 visualization modes** selectable at runtime, with an initial value from `App.config`
+- **Optional styles** with a safe `None` default: Pulse, Glow, Trail, Scanline, and Precision are enabled only where their renderer is meaningful
+- **11 colour themes** selectable at runtime, including a restrained Studio reference theme
 - **Live mode, style, and theme selectors** in the title bar; changes apply immediately without restarting
 - **Heat-map colour gradient** with peak markers tinted to match their theme's colour at that height
 - **Peak-hold markers** with configurable hold time and decay
@@ -36,51 +36,64 @@ supported modes are:
 | `LED` | Professional peak meter; recording studios |
 | `Dots` | Smooth minimal style; ambient music |
 | `Wave` | Flowing organic motion; lo-fi / chill-hop |
-| `Center` | Energy from centre; orchestral / cinematic |
-| `Mirror` | Symmetrical balance; EDM / house music |
 | `Lollipop` | Thin frequency stems with a marker showing each current level |
 | `Waterfall` | Scrolling history of recent frequency levels |
 | `Radial Spectrum` | Frequency bands arranged around a circle |
 | `Contour` | Connected curve across frequency bands; interpolation is visual only |
-| `Note Map` | Approximate pitch-class view grouped from frequency bands |
-| `Ambient Particles` | Bounded deterministic particle field driven directly by copied display levels |
+| `Peak Trace` | Current spectrum with a short frequency-history trace |
+| `Threshold Monitor` | Current band levels classified around a visible monitoring threshold |
+| `Band Matrix` | Compact single-frame 83-band matrix |
+| `Octave Spectrum` | Ten grouped octave-range meters |
+| `Spectral Flux` | Per-band frame-to-frame energy change |
+| `Orbit History` | Radial frequency display with short historical rings |
+| `Octave Waterfall` | Scrolling grouped-octave history |
+| `Transient Map` | Compact per-band transient-strength matrix |
+| `Frequency Ribbon` | Layered recent frequency contours |
 
 ## Visual Styles
 
 Choose a style from the **Style** selector to overlay an effect without changing the selected mode's
-geometry. `None` is the default and is always safe. `Pulse` and `Glow` are available only with
-`Spectrum`, `LED`, and `Wave`; unsupported modes show `None` rather than implying that an effect is active.
+geometry. `None` is the default and is always safe. Every style is derived from the current display frame or
+captured display-frame history; no style generates autonomous motion. `Pulse` and Glow are used only on
+continuous or meter-oriented renderers, while Trail, Scanline, and Precision are exposed only for renderers
+that implement them. Unsupported combinations show `None` rather than implying that an effect is active.
+Random rotation selects a valid complete Mode × Style × Theme combination.
 
 | Style | Effect |
 |---|---|
 | `None` (default) | No overlay |
-| `Pulse` | Gently brightens the current palette over time |
+| `Pulse` | Brightens in proportion to the current signal level |
 | `Glow` | Adds a soft level-driven halo |
+| `Trail` | Shows recent captured signal peaks or contours |
+| `Scanline` | Marks the current aggregate signal level |
+| `Precision` | Adds static analytical reference guides |
 
 ## Colour Themes
 
 Choose a palette from the **Theme** selector in the title bar to change bar colours immediately. Themes
-control only the bar colour palette and are independent of, and composable with, any `Mode` above.
+apply semantic application, control, grid, and visualization colors in addition to their signal palette.
+Application chrome remains neutral and subordinate to active signal data.
 
 | Theme | Palette | Best For |
 |---|---|---|
 | `ClassicSmooth` (default) | Green → yellow → orange, red peak | Traditional VU/spectrum look |
-| `Ice` | Deep blue → cyan → white, icy peak | Cool, calm, minimal/ambient aesthetics |
-| `Sunset` | Dark amber → orange → red, pale gold peak | Warm, vibrant, sunset-inspired visuals |
-| `MonoCyan` | Single-hue cyan, brightness-graded, pale cyan peak | Clean, modern, monochrome/studio look |
-| `Synthwave` | Purple → magenta → pink, electric-cyan peak | 80s retro, synthwave, neon party visuals |
-| `Aurora` | Deep teal → emerald → cyan, pale violet peak | Cool, luminous ambient visuals |
-| `Obsidian Gold` | Dark gold → radiant gold → pale gold peak | Premium, classic display warmth |
-| `Midnight Prism` | Violet → electric cyan → cool-white peak | High-contrast nocturnal neon |
-| `Emerald Noir` | Deep emerald → vivid jade → mint-white peak | Luxurious green-on-black contrast |
-| `Crimson Velvet` | Dark crimson → rose → blush peak | Rich, dramatic warm contrast |
+| `Ice` | Blue → cyan → soft ice peak | Cool, calm analysis |
+| `Sunset` | Amber → coral → pale gold peak | Warm, restrained analysis |
+| `MonoCyan` | Blue-cyan lightness ladder | Clean technical display |
+| `Synthwave` | Violet → magenta → softened cyan peak | Restrained retro character |
+| `Aurora` | Emerald → cyan → pale lavender peak | Calm luminous analysis |
+| `Obsidian Gold` | Warm gold → pale gold peak | Premium warm display |
+| `Midnight Prism` | Violet → cyan → soft ice peak | Controlled nocturnal contrast |
+| `Emerald Noir` | Emerald → jade → mint peak | Refined green-on-neutral display |
+| `Crimson Velvet` | Crimson → rose → blush peak | Rich, controlled warm contrast |
+| `Studio` | Teal → blue on graphite/slate chrome | Professional reference theme |
 
 ## Configuration
 
 `App.config` still supplies the initial mode, style, and theme when the application starts:
 
 Runtime selections apply immediately for the current session and do not modify `App.config`.
-The selected mode, style, and theme, Fixed/Random choice, and random interval are saved in the current Windows user's application settings; saved choices take precedence over `App.config` on later launches. Legacy `Mode=Pulse` migrates to `Bricks` plus `Pulse`, and `Mode=Glow` migrates to `Spectrum` plus `Glow`, without rewriting the source setting.
+The selected mode, style, and theme, Fixed/Random choice, and random interval are saved in the current Windows user's application settings; saved choices take precedence over `App.config` on later launches. Legacy `Mode=Pulse` migrates to `Bricks` with `None`, `Mode=Glow` migrates to `Spectrum` plus `Glow`, and retired `Center`, `Mirror`, `Note Map`, and `Ambient Particles` values migrate safely to retained modes.
 
 ```xml
 <appSettings>

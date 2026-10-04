@@ -10,6 +10,7 @@ internal sealed class WaveSpectrumControl : Control
     private readonly byte[] _targets;
     private readonly float[] _levels;
     private readonly PointF[] _points;
+    private readonly PointF[] _trailPoints;
     private readonly Timer _timer;
     private DateTime _lastTick;
     private Color _lowColor = Color.LimeGreen;
@@ -17,12 +18,14 @@ internal sealed class WaveSpectrumControl : Control
     private Color _highColor = Color.Orange;
     private Color _peakColor = Color.Red;
     private VisualStyle _style;
+    private bool _hasTrail;
 
     internal WaveSpectrumControl(int bandCount)
     {
         _targets = new byte[bandCount];
         _levels = new float[bandCount];
         _points = new PointF[bandCount];
+        _trailPoints = new PointF[bandCount];
         _timer = new Timer { Interval = 16 };
         _timer.Tick += Timer_Tick;
 
@@ -61,6 +64,7 @@ internal sealed class WaveSpectrumControl : Control
         _midColor = theme.Mid;
         _highColor = theme.High;
         _peakColor = theme.Peak;
+        BackColor = theme.Ui.WaveSurface;
         Invalidate();
     }
 
@@ -100,31 +104,47 @@ internal sealed class WaveSpectrumControl : Control
         fillPath.AddLines(_points);
         fillPath.AddLine(_points[_points.Length - 1].X, height, _points[0].X, height);
         fillPath.CloseFigure();
-        using var fillBrush = new SolidBrush(Color.FromArgb(55, _midColor));
+        using var fillBrush = new SolidBrush(Color.FromArgb(_style == VisualStyle.Precision ? 28 : 42, _midColor));
         e.Graphics.FillPath(fillBrush, fillPath);
 
+        if (_style == VisualStyle.Trail && _hasTrail)
+        {
+            using var trailPen = new Pen(Color.FromArgb(58, _midColor), 1.5f)
+            {
+                LineJoin = LineJoin.Round
+            };
+            e.Graphics.DrawLines(trailPen, _trailPoints);
+        }
+
         var pulse = _style == VisualStyle.Pulse
-            ? 0.10f + (0.18f * (((float)Math.Sin(DateTime.UtcNow.TimeOfDay.TotalSeconds * Math.PI * 2.0) + 1f) / 2f))
+            ? 0.08f + (0.20f * GetAverageLevel())
             : 0f;
+        var scanlineY = height * (1f - GetAverageLevel());
+        if (_style == VisualStyle.Scanline)
+        {
+            using var scanPen = new Pen(Color.FromArgb(72, _highColor), 1f);
+            e.Graphics.DrawLine(scanPen, 0f, scanlineY, ClientSize.Width - 1f, scanlineY);
+        }
+
         for (var i = 1; i < _points.Length; i++)
         {
             var level = (_levels[i - 1] + _levels[i]) / (2f * 255f);
             var color = GetLevelColor(level);
             if (pulse > 0f)
                 color = Lerp(color, Color.White, pulse);
-            using var pen = new Pen(color, _style == VisualStyle.Glow ? 5f : 2f)
+            using var pen = new Pen(color, _style == VisualStyle.Glow ? 4f : _style == VisualStyle.Precision ? 2.75f : 2.25f)
             {
                 LineJoin = LineJoin.Round,
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round
             };
             if (_style == VisualStyle.Glow)
-                pen.Color = Color.FromArgb(70, color);
+                pen.Color = Color.FromArgb(54, color);
             e.Graphics.DrawLine(pen, _points[i - 1], _points[i]);
 
             if (_style == VisualStyle.Glow)
             {
-                using var corePen = new Pen(color, 2f)
+                using var corePen = new Pen(color, 2.25f)
                 {
                     LineJoin = LineJoin.Round,
                     StartCap = LineCap.Round,
@@ -132,6 +152,9 @@ internal sealed class WaveSpectrumControl : Control
                 };
                 e.Graphics.DrawLine(corePen, _points[i - 1], _points[i]);
             }
+
+            Array.Copy(_points, _trailPoints, _points.Length);
+            _hasTrail = true;
         }
     }
 
@@ -162,6 +185,18 @@ internal sealed class WaveSpectrumControl : Control
         if (level <= 0.85f)
             return Lerp(_midColor, _highColor, (level - 0.55f) / 0.30f);
         return Lerp(_highColor, _peakColor, (level - 0.85f) / 0.15f);
+    }
+
+    private float GetAverageLevel()
+    {
+        if (_levels.Length == 0)
+            return 0f;
+
+        var total = 0f;
+        for (var i = 0; i < _levels.Length; i++)
+            total += _levels[i];
+
+        return Math.Max(0f, Math.Min(1f, total / (_levels.Length * 255f)));
     }
 
     private static Color Lerp(Color from, Color to, float amount) => Color.FromArgb(
