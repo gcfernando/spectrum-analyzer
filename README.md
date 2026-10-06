@@ -85,7 +85,7 @@ A .NET Framework 4.8 Windows Forms application that captures your system's audio
 
 `Spectrum` · `Bricks` · `LED` · `Dots` · `Wave` · `Lollipop` · `Waterfall` · `Radial Spectrum` · `Contour`
 
-`Peak Trace` · `Threshold Monitor` · `Band Matrix` · `Octave Spectrum` · `Spectral Flux` · `Orbit History` · `Octave Waterfall` · `Transient Map` · `Frequency Ribbon`
+`Peak Trace` · `Threshold Monitor` · `Band Matrix` · `Octave Spectrum` · `Level Change` · `Orbit History` · `Octave Waterfall` · `Level Change Map` · `Frequency Ribbon`
 
 </div>
 
@@ -102,15 +102,15 @@ supported modes are:
 | `Lollipop` | Thin frequency stems with a marker showing each current level |
 | `Waterfall` | Scrolling history of recent frequency levels |
 | `Radial Spectrum` | Frequency bands arranged around a circle |
-| `Contour` | Connected curve across frequency bands; interpolation is visual only |
+| `Contour` | Connected line across the measured frequency bands |
 | `Peak Trace` | Current spectrum with a short frequency-history trace |
 | `Threshold Monitor` | Current band levels classified around a visible monitoring threshold |
 | `Band Matrix` | Compact single-frame 83-band matrix |
-| `Octave Spectrum` | Ten grouped octave-range meters |
-| `Spectral Flux` | Per-band frame-to-frame energy change |
+| `Octave Spectrum` | Ten grouped octave-range meters; visible band powers are summed before display conversion |
+| `Level Change` | Per-band frame-to-frame displayed-level change; it is not a power-domain spectral-flux measurement |
 | `Orbit History` | Radial frequency display with short historical rings |
 | `Octave Waterfall` | Scrolling grouped-octave history |
-| `Transient Map` | Compact per-band transient-strength matrix |
+| `Level Change Map` | Compact matrix of per-band frame-to-frame displayed-level change; it is not a transient detector |
 | `Frequency Ribbon` | Layered recent frequency contours |
 
 <a id="styles"></a>
@@ -313,7 +313,7 @@ one channel alone reads −3 dB, and phase between channels never changes the le
 only the front pair is measured.
 
 **Timing (default Spectrum mode).** Attack: full-scale rise in 45 ms. Release: exponential, time constant
-280 ms. Peak marker: 300 ms hold, then a linear fall, independent of the bar. Bricks use ±2 px (≈0.5 dB) hysteresis so a level
+380 ms. Peak marker: 300 ms hold, then a linear fall, independent of the bar. Bricks use ±2 px (≈0.5 dB) hysteresis so a level
 hovering at a brick boundary does not flicker (steady-level display error ≤ ±1.44 dB); the animation runs at ~64 fps. Other visual modes keep their
 own presentation presets.
 
@@ -351,4 +351,3 @@ bars trail treble bars by roughly 0.1 s. This is the time/frequency trade-off of
 **Windows Audio Spectrum Visualizer · .NET Framework 4.8 · WASAPI Loopback**
 
 </div>
-

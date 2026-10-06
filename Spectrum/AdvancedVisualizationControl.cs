@@ -510,7 +510,7 @@ public sealed class AdvancedVisualizationControl : Control
             }
 
             _contourPath.Reset();
-            _contourPath.AddCurve(_plotPoints, 0, BandCount - 1, 0.25f);
+            _contourPath.AddLines(_plotPoints);
             _contourPath.AddLine(width - 1f, baseline, 0f, baseline);
             _contourPath.CloseFigure();
 
@@ -522,7 +522,7 @@ public sealed class AdvancedVisualizationControl : Control
             _linePen.Width = Math.Max(1f, Math.Min(2.5f, height / 100f));
             _linePen.Color = _levelBrushes[220].Color;
             _contourPath.Reset();
-            _contourPath.AddCurve(_plotPoints, 0, BandCount - 1, 0.25f);
+            _contourPath.AddLines(_plotPoints);
             _softLinePen.Color = Color.FromArgb(48, _linePen.Color);
             graphics.DrawPath(_softLinePen, _contourPath);
             graphics.DrawPath(_linePen, _contourPath);
@@ -775,7 +775,7 @@ public sealed class AdvancedVisualizationControl : Control
             }
 
             _contourPath.Reset();
-            _contourPath.AddCurve(_plotPoints, 0, BandCount - 1, 0.2f);
+            _contourPath.AddLines(_plotPoints);
             _linePen.Color = color;
             _linePen.Width = thickness;
             graphics.DrawPath(_linePen, _contourPath);
@@ -792,14 +792,15 @@ public sealed class AdvancedVisualizationControl : Control
             return frame;
         }
 
-    private static byte GetGroupLevel(byte[] values, int group, int groupCount, int offset = 0)
+        internal static byte GetGroupLevel(byte[] values, int group, int groupCount, int offset = 0)
         {
             var start = offset + ((group * BandCount) / groupCount);
             var end = offset + (((group + 1) * BandCount) / groupCount);
-            byte max = 0;
+            var power = 0.0;
             for (var index = start; index < end; index++)
-                max = Math.Max(max, values[index]);
-            return max;
+                power += LevelScale.DisplayByteToRelativePower(values[index]);
+
+            return LevelScale.ToDisplayByte(LevelScale.PowerToDb(power));
         }
 
     private void BuildNoteMap(BandPlan plan)

@@ -79,24 +79,24 @@ public class VisualStyleTests
     [InlineData("Threshold Monitor")]
     [InlineData("Band Matrix")]
     [InlineData("Octave Spectrum")]
-    [InlineData("Spectral Flux")]
+    [InlineData("Level Change")]
     [InlineData("Orbit History")]
     [InlineData("Octave Waterfall")]
-    [InlineData("Transient Map")]
+    [InlineData("Level Change Map")]
     [InlineData("Frequency Ribbon")]
     public void NewModesAreExposedAndHaveValidStyleChoices(string mode)
     {
         Assert.Contains(mode, GetVisualModes());
         Assert.Contains("None", VisualStyles.GetSupportedNames(mode));
-        Assert.Contains("Trail", VisualStyles.GetSupportedNames(mode));
         Assert.Contains("Scanline", VisualStyles.GetSupportedNames(mode));
         Assert.Contains("Precision", VisualStyles.GetSupportedNames(mode));
+        Assert.DoesNotContain("Trail", VisualStyles.GetSupportedNames(mode));
     }
 
     [Theory]
     [InlineData("Spectrum", "Glow")]
     [InlineData("LED", "Pulse")]
-    [InlineData("Band Matrix", "Trail")]
+    [InlineData("Band Matrix", "Scanline")]
     [InlineData("Bricks", "Precision")]
     public void RandomStyleSelectionReturnsAnotherValidStyle(string mode, string currentStyle)
     {
@@ -104,6 +104,17 @@ public class VisualStyleTests
 
         Assert.Contains(next, VisualStyles.GetSupportedNames(mode));
         Assert.NotEqual(currentStyle, next);
+    }
+
+    [Theory]
+    [InlineData("Spectral Flux", "Level Change")]
+    [InlineData("Transient Map", "Level Change Map")]
+    public void LegacyDerivedModeNamesMigrateToAccurateLabels(string legacyName, string expectedName)
+    {
+        FormAudioSpectrum.ResolveConfiguredVisualState(legacyName, "Trail", out var mode, out var style);
+
+        Assert.Equal(expectedName, mode);
+        Assert.Equal("None", style);
     }
 
     private static string[] GetVisualModes() =>

@@ -90,11 +90,27 @@ public class SampleHistoryTests
         h.Write(Ramp(0, 40, 1), 40);
         var dest = new float[16];
         Assert.True(h.TryCopyLatest(dest, 16, out var end));
-        Assert.Equal(16, end); // Only the frames that could be stored are counted.
+        Assert.Equal(40, end); // Frame accounting remains absolute even when only the tail can be retained.
         for (var i = 0; i < 16; i++)
         {
             Assert.Equal((24 + i) * 10f, dest[i]);
         }
+    }
+
+    [Fact]
+    public void OversizedWrite_PreservesAbsoluteFramePositionsForGapTracking()
+    {
+        var h = new SampleHistory(1, 16);
+        h.Write(Ramp(0, 40, 1), 40);
+        h.Write(Ramp(40, 4, 1), 4);
+        var dest = new float[16];
+
+        Assert.True(h.TryCopyLatest(dest, 16, out var end, discardBeforeFrame: 40));
+        Assert.Equal(44, end);
+        for (var i = 0; i < 12; i++)
+            Assert.Equal(0f, dest[i]);
+        for (var i = 0; i < 4; i++)
+            Assert.Equal((40 + i) * 10f, dest[12 + i]);
     }
 
     [Fact]

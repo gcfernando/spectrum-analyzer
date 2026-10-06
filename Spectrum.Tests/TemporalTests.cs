@@ -147,6 +147,12 @@ public class EndToEndTimingTests
     private const int AttackMs = FormAudioSpectrum.SPECTRUM_ATTACK_MS;
     private const int ReleaseMs = FormAudioSpectrum.SPECTRUM_RELEASE_MS;
 
+    [Fact]
+    public void SpectrumReleasePresetMatchesTheDocumentedContract()
+    {
+        Assert.Equal(380, ReleaseMs);
+    }
+
     private readonly ITestOutputHelper _out;
 
     public EndToEndTimingTests(ITestOutputHelper output) => _out = output;

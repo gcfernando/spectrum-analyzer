@@ -16,13 +16,13 @@ public partial class FormAudioSpectrum : Form
     private static readonly string[] s_advancedModes =
     {
         "Waterfall", "Radial Spectrum", "Contour", "Peak Trace", "Threshold Monitor", "Band Matrix",
-        "Octave Spectrum", "Spectral Flux", "Orbit History", "Octave Waterfall", "Transient Map", "Frequency Ribbon"
+        "Octave Spectrum", "Level Change", "Orbit History", "Octave Waterfall", "Level Change Map", "Frequency Ribbon"
     };
     private static readonly string[] s_visualModes =
     {
         "Spectrum", "Bricks", "LED", "Dots", "Wave", "Lollipop",
         "Waterfall", "Radial Spectrum", "Contour", "Peak Trace", "Threshold Monitor", "Band Matrix",
-        "Octave Spectrum", "Spectral Flux", "Orbit History", "Octave Waterfall", "Transient Map", "Frequency Ribbon"
+        "Octave Spectrum", "Level Change", "Orbit History", "Octave Waterfall", "Level Change Map", "Frequency Ribbon"
     };
     private static readonly string[] s_colorThemes = BarColorThemes.Names;
 
@@ -443,7 +443,7 @@ public partial class FormAudioSpectrum : Form
             case "Waterfall":
             case "Octave Waterfall":
             case "Band Matrix":
-            case "Transient Map":
+            case "Level Change Map":
                 for (var row = 0; row < 3; row++)
                     for (var column = 0; column < 4; column++)
                         if ((row + column) % 3 != 0)
@@ -476,7 +476,7 @@ public partial class FormAudioSpectrum : Form
             case "Octave Spectrum":
                 DrawBars(graphics, brush, bounds, new[] { 4, 8, 12, 7, 10 });
                 break;
-            case "Spectral Flux":
+            case "Level Change":
                 for (var i = 0; i < 4; i++)
                     graphics.DrawLine(pen, bounds.Left + 2 + (i * 5), bounds.Bottom - 2, bounds.Left + 2 + (i * 5), bounds.Top + (i % 2 == 0 ? 3 : 7));
                 break;
@@ -549,6 +549,10 @@ public partial class FormAudioSpectrum : Form
         var normalized = configuredValue.Trim();
         switch (normalized.ToLowerInvariant())
         {
+            case "spectral flux":
+                return "Level Change";
+            case "transient map":
+                return "Level Change Map";
             case "center":
                 return "Spectrum";
             case "mirror":
@@ -636,13 +640,13 @@ public partial class FormAudioSpectrum : Form
                 return AdvancedVisualizationMode.BandMatrix;
             case "octave spectrum":
                 return AdvancedVisualizationMode.OctaveSpectrum;
-            case "spectral flux":
+            case "level change":
                 return AdvancedVisualizationMode.SpectralFlux;
             case "orbit history":
                 return AdvancedVisualizationMode.OrbitHistory;
             case "octave waterfall":
                 return AdvancedVisualizationMode.OctaveWaterfall;
-            case "transient map":
+            case "level change map":
                 return AdvancedVisualizationMode.TransientMap;
             case "frequency ribbon":
                 return AdvancedVisualizationMode.FrequencyRibbon;
@@ -1319,9 +1323,18 @@ public partial class FormAudioSpectrum : Form
 
     private void OnDisplaySettingsChanged(object sender, EventArgs e)
     {
+        if (_isDisposed || IsDisposed || Disposing)
+            return;
+
         if (InvokeRequired)
         {
-            Invoke(new Action(() => OnDisplaySettingsChanged(sender, e)));
+            try
+            {
+                Invoke(new Action(() => OnDisplaySettingsChanged(sender, e)));
+            }
+            catch (InvalidOperationException) when (_isDisposed || IsDisposed || Disposing)
+            {
+            }
             return;
         }
 
@@ -1364,7 +1377,19 @@ public partial class FormAudioSpectrum : Form
         if (!postNeeded) return;
 
         if (InvokeRequired)
-            _ = BeginInvoke(new Action(ApplySpectrumToUI));
+        {
+            try
+            {
+                _ = BeginInvoke(new Action(ApplySpectrumToUI));
+            }
+            catch (InvalidOperationException) when (_isDisposed || IsDisposed || Disposing)
+            {
+                lock (_updateLock)
+                {
+                    _updatePending = false;
+                }
+            }
+        }
         else
             ApplySpectrumToUI();
     }

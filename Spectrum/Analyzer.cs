@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using Spectrum.Dsp;
 using Un4seen.Bass;
@@ -53,6 +54,11 @@ public sealed class Analyzer : IDisposable
 
     // Prevents device recovery from starting a second tick while shared buffers are in use.
     private int _tickActive;
+    private int _tickThreadId;
+    private bool _freeDeferred;
+    private readonly ManualResetEventSlim _tickIdle = new(true);
+    private readonly object _lifecycleGate = new();
+    private readonly object _nativeFreeGate = new();
 
     private readonly byte[] _fireData;
     private readonly OnChangeEventArgs _fireEventArgs;
@@ -69,6 +75,9 @@ public sealed class Analyzer : IDisposable
     private bool _initialized;
     private volatile bool _disposed;
     private volatile bool _recovering; // True while device recovery is pending on the UI thread.
+    private int _recoveryPending;
+    private bool _nativeTeardownPending;
+    private bool _nativeHandlesFreed;
 
     private int _sampleRate = 48000; // Updated from WASAPI after initialization.
 
@@ -97,7 +106,7 @@ public sealed class Analyzer : IDisposable
         _timer.Elapsed += TimerTick;
 
         _ = Bass.BASS_SetConfig(BASSConfig.BASS_CONFIG_UPDATETHREADS, 0);
-        _ = Bass.BASS_Init(0, 48000, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero);
+        MarkNativeHandlesActive(Bass.BASS_Init(0, 48000, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero));
 
         _ = DeviceList();
         Enable(true);
@@ -113,32 +122,38 @@ public sealed class Analyzer : IDisposable
 
     private void OnAudioDeviceChanged()
     {
-        if (_disposed || _recovering)
+        if (!TryBeginRecovery())
         {
             return;
         }
-
-        _recovering = true;
 
         var ctx = _syncContext;
         if (ctx != null)
         {
             ctx.Post(_ =>
             {
-                if (_disposed)
-                { _recovering = false; return; }
-                _timer.Stop();
-                Free();
-                _ = Bass.BASS_Init(0, 48000, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero);
-                _initialized = false;
-                _ = DeviceList();
-                _recovering = false;
-                Enable(true);
+                if (_disposed || IsNativeTeardownPending())
+                { CompleteRecovery(); return; }
+
+                lock (_nativeFreeGate)
+                {
+                    _timer.Stop();
+                    Free();
+                    if (_disposed || IsNativeTeardownPending())
+                    { CompleteRecovery(); return; }
+
+                    MarkNativeHandlesActive(Bass.BASS_Init(0, 48000, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero));
+                    _initialized = false;
+                    _ = DeviceList();
+                    Enable(true);
+                }
+                CompleteRecovery();
+                StartTimerAfterRecovery();
             }, null);
         }
         else
         {
-            _recovering = false;
+            CompleteRecovery();
         }
     }
 
@@ -165,14 +180,23 @@ public sealed class Analyzer : IDisposable
         try
         {
             var mmEnum = new NAudio.CoreAudioApi.MMDeviceEnumerator();
-            var defaultDev = mmEnum.GetDefaultAudioEndpoint(
-                NAudio.CoreAudioApi.DataFlow.Render,
-                NAudio.CoreAudioApi.Role.Multimedia);
-            var defaultName = defaultDev.FriendlyName;
-            device = devices.FirstOrDefault(d =>
-                string.Equals(d.DeviceName, defaultName, StringComparison.OrdinalIgnoreCase)
-                || d.DeviceName.IndexOf(defaultName, StringComparison.OrdinalIgnoreCase) >= 0
-                || defaultName.IndexOf(d.DeviceName, StringComparison.OrdinalIgnoreCase) >= 0);
+            NAudio.CoreAudioApi.MMDevice defaultDev = null;
+            try
+            {
+                defaultDev = mmEnum.GetDefaultAudioEndpoint(
+                    NAudio.CoreAudioApi.DataFlow.Render,
+                    NAudio.CoreAudioApi.Role.Multimedia);
+                var defaultName = defaultDev.FriendlyName;
+                device = devices.FirstOrDefault(d =>
+                    string.Equals(d.DeviceName, defaultName, StringComparison.OrdinalIgnoreCase)
+                    || d.DeviceName.IndexOf(defaultName, StringComparison.OrdinalIgnoreCase) >= 0
+                    || defaultName.IndexOf(d.DeviceName, StringComparison.OrdinalIgnoreCase) >= 0);
+            }
+            finally
+            {
+                ReleaseComObject(defaultDev);
+                ReleaseComObject(mmEnum);
+            }
         }
         catch { }
 
@@ -252,7 +276,15 @@ public sealed class Analyzer : IDisposable
                 _initialized = true;
             }
 
-            _ = BassWasapi.BASS_WASAPI_Start();
+            if (!BassWasapi.BASS_WASAPI_Start())
+            {
+                var error = Bass.BASS_ErrorGetCode();
+                System.Diagnostics.Debug.WriteLine($"WASAPI Start failed: {error}");
+                _ = BassWasapi.BASS_WASAPI_Free();
+                _initialized = false;
+                return;
+            }
+
             _timer.Start();
         }
         else
@@ -278,32 +310,61 @@ public sealed class Analyzer : IDisposable
             return;
         }
 
-        WaitForTickToFinish();
+        lock (_lifecycleGate)
+        {
+            _nativeTeardownPending = true;
+            _timer.Stop();
+            if (_tickThreadId == Environment.CurrentManagedThreadId)
+            {
+                _freeDeferred = true;
+                return;
+            }
+        }
 
-        _ = BassWasapi.BASS_WASAPI_Free();
-        _ = Bass.BASS_Free();
+        WaitForTickToFinish();
+        try
+        {
+            lock (_nativeFreeGate)
+            {
+                if (!_disposed && !_nativeHandlesFreed)
+                {
+                    _ = BassWasapi.BASS_WASAPI_Free();
+                    _ = Bass.BASS_Free();
+                    _nativeHandlesFreed = true;
+                }
+            }
+        }
+        finally
+        {
+            lock (_lifecycleGate)
+            {
+                _nativeTeardownPending = false;
+            }
+        }
     }
 
-    // Wait briefly for analysis to finish before freeing BASS handles used by the timer thread.
+    // Native handles remain valid until the active analysis tick has completed.
     private void WaitForTickToFinish()
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (Volatile.Read(ref _tickActive) != 0 && sw.ElapsedMilliseconds < 200)
-        {
-            Thread.Sleep(1);
-        }
+        _tickIdle.Wait();
     }
 
     private void TimerTick(object sender, ElapsedEventArgs e)
     {
-        if (_disposed || _recovering)
+        lock (_lifecycleGate)
         {
-            return;
-        }
+            if (_disposed || _recovering || _nativeTeardownPending)
+            {
+                return;
+            }
 
-        if (Interlocked.CompareExchange(ref _tickActive, 1, 0) != 0)
-        {
-            return; // The active tick restarts the timer in its finally block.
+            if (Interlocked.CompareExchange(ref _tickActive, 1, 0) != 0)
+            {
+                return; // The active tick restarts the timer in its finally block.
+            }
+
+            _tickIdle.Reset();
+            _tickThreadId = Environment.CurrentManagedThreadId;
         }
 
         try
@@ -330,13 +391,26 @@ public sealed class Analyzer : IDisposable
         }
         finally
         {
-            Volatile.Write(ref _tickActive, 0);
-
-            if (!_disposed && !_recovering)
+            var freeDeferred = false;
+            lock (_lifecycleGate)
             {
-                try
-                { _timer.Start(); }
-                catch (ObjectDisposedException) { }
+                Volatile.Write(ref _tickActive, 0);
+                _tickThreadId = 0;
+                _tickIdle.Set();
+                freeDeferred = _freeDeferred;
+                _freeDeferred = false;
+
+                if (!freeDeferred && !_disposed && !_recovering && !_nativeTeardownPending)
+                {
+                    try
+                    { _timer.Start(); }
+                    catch (ObjectDisposedException) { }
+                }
+            }
+
+            if (freeDeferred)
+            {
+                ThreadPool.QueueUserWorkItem(_ => Free());
             }
         }
     }
@@ -370,50 +444,154 @@ public sealed class Analyzer : IDisposable
     private void FireOnChange()
     {
         Buffer.BlockCopy(_spectrumData, 0, _fireData, 0, LINES);
-        OnChange?.Invoke(_sender, _fireEventArgs);
+        var handlers = OnChange;
+        if (handlers == null)
+        {
+            return;
+        }
+
+        foreach (OnChangeHandler handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(_sender, _fireEventArgs);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Spectrum update subscriber failed: {ex}");
+            }
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     // CaptureGate requires stalled frames and a frozen non-zero level to detect a device hang.
     private void RecoverHungDevice()
     {
-        _recovering = true;
+        if (!TryBeginRecovery())
+        {
+            return;
+        }
 
         var ctx = _syncContext;
         if (ctx != null)
         {
             ctx.Post(_ =>
             {
-                if (_disposed)
-                { _recovering = false; return; }
-                Free();
-                _ = Bass.BASS_Init(0, 48000, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero);
-                _initialized = false;
-                _recovering = false;
-                Enable(true);
+                if (_disposed || IsNativeTeardownPending())
+                { CompleteRecovery(); return; }
+
+                lock (_nativeFreeGate)
+                {
+                    Free();
+                    if (_disposed || IsNativeTeardownPending())
+                    { CompleteRecovery(); return; }
+
+                    MarkNativeHandlesActive(Bass.BASS_Init(0, 48000, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero));
+                    _initialized = false;
+                    Enable(true);
+                }
+                CompleteRecovery();
+                StartTimerAfterRecovery();
             }, null);
         }
         else
         {
-            // Run recovery inline and keep _tickActive set so concurrent disposal waits for teardown to finish.
-            _ = BassWasapi.BASS_WASAPI_Free();
-            _ = Bass.BASS_Free();
-            _ = Bass.BASS_Init(0, 48000, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero);
+            // Run recovery inline and keep _tickActive set so concurrent teardown waits for this transition.
+            lock (_lifecycleGate)
+            {
+                if (_disposed || _nativeTeardownPending)
+                {
+                    CompleteRecovery();
+                    return;
+                }
+            }
+
+            lock (_nativeFreeGate)
+            {
+                _ = BassWasapi.BASS_WASAPI_Free();
+                _ = Bass.BASS_Free();
+                _nativeHandlesFreed = true;
+                MarkNativeHandlesActive(Bass.BASS_Init(0, 48000, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero));
+            }
             _initialized = false;
-            _recovering = false;
             Enable(true);
+            CompleteRecovery();
+            StartTimerAfterRecovery();
+        }
+    }
+
+    private bool TryBeginRecovery()
+    {
+        lock (_lifecycleGate)
+        {
+            if (_disposed || _nativeTeardownPending ||
+                Interlocked.CompareExchange(ref _recoveryPending, 1, 0) != 0)
+            {
+                return false;
+            }
+
+            _recovering = true;
+            return true;
+        }
+    }
+
+    private void CompleteRecovery()
+    {
+        _recovering = false;
+        Volatile.Write(ref _recoveryPending, 0);
+    }
+
+    private void StartTimerAfterRecovery()
+    {
+        if (_disposed || !_initialized)
+        {
+            return;
+        }
+
+        try
+        {
+            _timer.Start();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private bool IsNativeTeardownPending()
+    {
+        lock (_lifecycleGate)
+        {
+            return _nativeTeardownPending;
         }
     }
 
     public void Dispose()
     {
-        if (_disposed)
+        var disposeOnWorker = false;
+        lock (_lifecycleGate)
         {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _nativeTeardownPending = true;
+            _timer.Stop();
+            disposeOnWorker = _tickThreadId == Environment.CurrentManagedThreadId;
+        }
+
+        if (disposeOnWorker)
+        {
+            ThreadPool.QueueUserWorkItem(_ => DisposeAfterTick());
             return;
         }
 
-        _disposed = true;
+        DisposeAfterTick();
+    }
 
+    private void DisposeAfterTick()
+    {
         if (_mmEnumerator != null)
         {
             try
@@ -424,19 +602,75 @@ public sealed class Analyzer : IDisposable
                 }
             }
             catch { }
+            ReleaseComObject(_mmEnumerator);
             _mmEnumerator = null;
         }
 
-        _timer.Stop();
         _timer.Elapsed -= TimerTick;
         _timer.Dispose();
 
         // Free() returns when disposed, so clean up BASS directly.
         WaitForTickToFinish();
-        _ = BassWasapi.BASS_WASAPI_Free();
-        _ = Bass.BASS_Free();
+        try
+        {
+            lock (_nativeFreeGate)
+            {
+                if (!_nativeHandlesFreed)
+                {
+                    _ = BassWasapi.BASS_WASAPI_Free();
+                    _ = Bass.BASS_Free();
+                    _nativeHandlesFreed = true;
+                }
+            }
+        }
+        finally
+        {
+            lock (_lifecycleGate)
+            {
+                _nativeTeardownPending = false;
+            }
+        }
+        _tickIdle.Dispose();
 
         OnChange = null;
+    }
+
+    private static void ReleaseComObject(object instance)
+    {
+        if (instance == null)
+        {
+            return;
+        }
+
+        if (Marshal.IsComObject(instance))
+        {
+            _ = Marshal.ReleaseComObject(instance);
+            return;
+        }
+
+        var fields = instance.GetType().GetFields(
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        foreach (var field in fields)
+        {
+            var resource = field.GetValue(instance);
+            if (resource != null && Marshal.IsComObject(resource))
+            {
+                _ = Marshal.ReleaseComObject(resource);
+            }
+        }
+    }
+
+    private void MarkNativeHandlesActive(bool initialized)
+    {
+        if (!initialized)
+        {
+            return;
+        }
+
+        lock (_nativeFreeGate)
+        {
+            _nativeHandlesFreed = false;
+        }
     }
 
     private sealed class CaptureStream

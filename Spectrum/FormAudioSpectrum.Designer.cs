@@ -13,6 +13,10 @@
         /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
         protected override void Dispose(bool disposing)
         {
+            if (disposing)
+            {
+                CleanupResources();
+            }
             if (disposing && (components != null))
             {
                 components.Dispose();
@@ -76,7 +80,7 @@
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.KeyPreview = true;
             this.MaximizeBox = false;
-            this.MinimumSize = new System.Drawing.Size(261, 65);
+            this.MinimumSize = new System.Drawing.Size(900, 250);
             this.Name = "FormAudioSpectrum";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Audio Spectrum Analyzer";

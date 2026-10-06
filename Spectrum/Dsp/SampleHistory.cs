@@ -50,12 +50,13 @@ internal sealed class SampleHistory
         }
 
         var samples = byteLength / sizeof(float);
-        var frames = samples / Channels;
-        if (frames <= 0)
+        var inputFrames = samples / Channels;
+        if (inputFrames <= 0)
         {
             return;
         }
 
+        var frames = inputFrames;
         var sourceOffsetSamples = 0;
         if (frames > _capacityFrames)
         {
@@ -65,9 +66,12 @@ internal sealed class SampleHistory
         }
 
         var committed = Interlocked.Read(ref _committedFrames); // The producer is the only writer.
-        Interlocked.Exchange(ref _reservedFrames, committed + frames); // Publish the reservation before overwriting samples.
+        var endFrame = committed + inputFrames;
+        Interlocked.Exchange(ref _reservedFrames, endFrame); // Publish the reservation before overwriting samples.
 
-        var ringFrame = (int)(committed % _capacityFrames);
+        // Oversized writes retain only their tail, but frame positions remain absolute.
+        var firstStoredFrame = endFrame - frames;
+        var ringFrame = (int)(firstStoredFrame % _capacityFrames);
         var firstFrames = Math.Min(frames, _capacityFrames - ringFrame);
         var src = IntPtr.Add(buffer, sourceOffsetSamples * sizeof(float));
 
@@ -77,7 +81,7 @@ internal sealed class SampleHistory
             Marshal.Copy(IntPtr.Add(src, firstFrames * Channels * sizeof(float)), _ring, 0, (frames - firstFrames) * Channels);
         }
 
-        Interlocked.Exchange(ref _committedFrames, committed + frames); // Publish samples before advancing the committed count.
+        Interlocked.Exchange(ref _committedFrames, endFrame); // Publish samples before advancing the committed count.
     }
 
     /// <summary>Appends interleaved samples from a managed array.</summary>

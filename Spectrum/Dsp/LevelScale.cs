@@ -43,4 +43,16 @@ internal static class LevelScale
 
     /// <summary>Quantizes normalized height to the published spectrum's 0–255 byte range.</summary>
     public static byte ToDisplayByte(double levelDb) => (byte)Math.Round(Normalize(levelDb) * 255.0);
+
+    /// <summary>Converts a published display level back to its quantized relative-power estimate.</summary>
+    public static double DisplayByteToRelativePower(byte displayLevel)
+    {
+        if (displayLevel == 0)
+        {
+            return 0.0;
+        }
+
+        var db = FloorDb + ((CeilingDb - FloorDb) * displayLevel / 255.0);
+        return Math.Pow(10.0, db / 10.0);
+    }
 }

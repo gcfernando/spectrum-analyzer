@@ -122,6 +122,20 @@ public class SpectralMeasurementTests
         Assert.All(db, v => Assert.True(v < LevelScale.FloorDb, $"{v:F1} dB"));
     }
 
+    [Fact]
+    public void NyquistTone_UsesTheUndoubledOneSidedPowerTerm()
+    {
+        const int fs = 32000;
+        var engine = Signals.DefaultEngine(fs);
+        var samples = Signals.Interleaved(engine.RequiredFrames, 2, (_, frame) => (frame & 1) == 0 ? 1.0 : -1.0);
+        var power = Signals.AnalyzePower(engine, samples);
+
+        // A full-scale Nyquist alternating sequence has mean-square power 1.0: +3.01 dB
+        // relative to the analyzer's 0.5 full-scale-sine reference. Doubling Nyquist would read +6.02 dB.
+        Assert.Equal(engine.Plan.Count - 1, Signals.ArgMax(power));
+        Assert.InRange(LevelScale.PowerToDb(power[power.Length - 1]), 2.95, 3.07);
+    }
+
     // Sweeps.
 
     [Theory]

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -12,7 +13,8 @@ internal sealed class WaveSpectrumControl : Control
     private readonly PointF[] _points;
     private readonly PointF[] _trailPoints;
     private readonly Timer _timer;
-    private DateTime _lastTick;
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private long _lastTickTimestamp;
     private Color _lowColor = Color.LimeGreen;
     private Color _midColor = Color.Gold;
     private Color _highColor = Color.Orange;
@@ -43,7 +45,7 @@ internal sealed class WaveSpectrumControl : Control
 
         if (!_timer.Enabled)
         {
-            _lastTick = DateTime.UtcNow;
+            _lastTickTimestamp = _clock.ElapsedTicks;
             _timer.Start();
         }
     }
@@ -153,16 +155,18 @@ internal sealed class WaveSpectrumControl : Control
                 e.Graphics.DrawLine(corePen, _points[i - 1], _points[i]);
             }
 
-            Array.Copy(_points, _trailPoints, _points.Length);
-            _hasTrail = true;
         }
+
+        Array.Copy(_points, _trailPoints, _points.Length);
+        _hasTrail = GetAverageLevel() > 0f;
     }
 
     private void Timer_Tick(object sender, EventArgs e)
     {
-        var now = DateTime.UtcNow;
-        var elapsedSeconds = Math.Min(0.2f, Math.Max(0.001f, (float)(now - _lastTick).TotalSeconds));
-        _lastTick = now;
+        var now = _clock.ElapsedTicks;
+        var elapsedSeconds = Math.Min(0.2f, Math.Max(0.001f,
+            (float)(now - _lastTickTimestamp) / Stopwatch.Frequency));
+        _lastTickTimestamp = now;
 
         var moving = false;
         for (var i = 0; i < _levels.Length; i++)
@@ -171,6 +175,9 @@ internal sealed class WaveSpectrumControl : Control
             if (Math.Abs(_levels[i] - _targets[i]) > 0.06f)
                 moving = true;
         }
+
+        if (!moving && GetAverageLevel() <= 0f)
+            _hasTrail = false;
 
         Invalidate();
         if (!moving)

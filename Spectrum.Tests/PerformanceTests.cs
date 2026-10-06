@@ -16,8 +16,6 @@ public class PerformanceTests
     [Fact]
     public void AnalysisFrame_IsAllocationFreeAndCheapRelativeToTheHop()
     {
-        AppDomain.MonitoringIsEnabled = true;
-
         var engine = Signals.DefaultEngine();
         var history = new SampleHistory(2, engine.RequiredFrames * 4);
         var chunk = Signals.StereoSine(480, 48000, 1000, 0.5, 0.5);
@@ -45,7 +43,7 @@ public class PerformanceTests
         GC.Collect();
         GC.WaitForPendingFinalizers();
         var gen0 = GC.CollectionCount(0);
-        var allocBefore = AppDomain.CurrentDomain.MonitoringTotalAllocatedMemorySize;
+        var allocBefore = GC.GetAllocatedBytesForCurrentThread();
 
         const int frames = 400;
         var sw = Stopwatch.StartNew();
@@ -55,11 +53,11 @@ public class PerformanceTests
         }
 
         sw.Stop();
-        var allocated = AppDomain.CurrentDomain.MonitoringTotalAllocatedMemorySize - allocBefore;
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocBefore;
         var msPerFrame = sw.Elapsed.TotalMilliseconds / frames;
 
         _out.WriteLine($"stereo 83-band frame (windows 4096+8192+16384, longest zero-padded to 32768): {msPerFrame:F3} ms/frame = {msPerFrame / 31.7 * 100:F1} % of one core at the measured 31.7 ms hop");
-        _out.WriteLine($"allocated {allocated} bytes over {frames} frames (AppDomain-wide, includes test-runner noise); gen0 collections {GC.CollectionCount(0) - gen0}");
+        _out.WriteLine($"allocated {allocated} bytes over {frames} frames on the analysis thread; gen0 collections {GC.CollectionCount(0) - gen0}");
 
         // Allow small host noise; it stays far below one array allocation per frame.
         Assert.True(allocated / (double)frames < 64, $"{allocated / (double)frames:F1} bytes/frame allocated");

@@ -19,7 +19,7 @@ internal static class VisualStyles
     private static readonly string[] s_meterStyles = { "None", "Scanline", "Precision" };
     private static readonly string[] s_ledStyles = { "None", "Pulse", "Scanline", "Precision" };
     private static readonly string[] s_fullStyles = { "None", "Pulse", "Glow", "Trail", "Scanline", "Precision" };
-    private static readonly string[] s_advancedStyles = { "None", "Trail", "Scanline", "Precision" };
+    private static readonly string[] s_advancedStyles = { "None", "Scanline", "Precision" };
 
     internal static string Resolve(string value)
     {
@@ -82,9 +82,9 @@ internal static class VisualStyles
         string.Equals(mode, "Threshold Monitor", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Band Matrix", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Octave Spectrum", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(mode, "Spectral Flux", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(mode, "Level Change", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Orbit History", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Octave Waterfall", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(mode, "Transient Map", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(mode, "Level Change Map", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Frequency Ribbon", StringComparison.OrdinalIgnoreCase);
 }

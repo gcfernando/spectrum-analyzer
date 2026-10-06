@@ -253,6 +253,46 @@ public class AdvancedVisualizationControlTests
             Assert.Equal(400f / (levels.Length - 1), points[i].X - points[i - 1].X, 3);
     }
 
+    [Fact]
+    public void WaveTrailClearsAfterTheDisplayedSignalSettlesToSilence()
+    {
+        RunOnSta(() =>
+        {
+            using var control = new WaveSpectrumControl(4)
+            {
+                Size = new Size(120, 60),
+                Style = VisualStyle.Trail
+            };
+            control.SetDisplayedLevelsForTesting(new[] { 255f, 128f, 64f, 0f });
+            using var active = new Bitmap(control.Width, control.Height);
+            control.DrawToBitmap(active, new Rectangle(Point.Empty, control.Size));
+
+            control.SetDisplayedLevelsForTesting(new float[4]);
+            using var silent = new Bitmap(control.Width, control.Height);
+            control.DrawToBitmap(silent, new Rectangle(Point.Empty, control.Size));
+
+            var hasTrail = (bool)typeof(WaveSpectrumControl)
+                .GetField("_hasTrail", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(control);
+            Assert.False(hasTrail);
+        });
+    }
+
+    [Fact]
+    public void OctaveAggregation_SumsQuantizedBandPowersInsteadOfChoosingTheMaximum()
+    {
+        var values = new byte[AdvancedVisualizationControl.BandCount];
+        var level = LevelScale.ToDisplayByte(-12);
+        values[0] = level;
+        values[1] = level;
+
+        var aggregate = AdvancedVisualizationControl.GetGroupLevel(values, 0, 10);
+        var db = LevelScale.PowerToDb(LevelScale.DisplayByteToRelativePower(aggregate));
+
+        Assert.InRange(db, -9.2, -8.8);
+        Assert.True(aggregate > level);
+    }
+
     private static VerticalProgressBar CreateBar(string mode) => new()
     {
         BackColor = Color.FromArgb(50, 50, 50),
@@ -271,10 +311,10 @@ public class AdvancedVisualizationControlTests
         AdvancedVisualizationMode.ThresholdMonitor => "Threshold Monitor",
         AdvancedVisualizationMode.BandMatrix => "Band Matrix",
         AdvancedVisualizationMode.OctaveSpectrum => "Octave Spectrum",
-        AdvancedVisualizationMode.SpectralFlux => "Spectral Flux",
+        AdvancedVisualizationMode.SpectralFlux => "Level Change",
         AdvancedVisualizationMode.OrbitHistory => "Orbit History",
         AdvancedVisualizationMode.OctaveWaterfall => "Octave Waterfall",
-        AdvancedVisualizationMode.TransientMap => "Transient Map",
+        AdvancedVisualizationMode.TransientMap => "Level Change Map",
         AdvancedVisualizationMode.FrequencyRibbon => "Frequency Ribbon",
         _ => mode.ToString()
     };
