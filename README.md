@@ -1,6 +1,6 @@
 <div align="center">
-  <h1>🎚️ Spectrum — Windows WASAPI Audio Spectrum Visualizer</h1>
-  <p><strong>Real-time system-audio analysis with precise frequency-band measurement and multiple live visualizations.</strong></p>
+  <h1>🎚️ Spectrum — Windows WASAPI Audio Spectrum Analyzer</h1>
+  <p><strong>A .NET Framework Windows Forms visualizer for real-time system-audio analysis, with 83 logarithmic bands and 18 live visualization modes.</strong></p>
   <p><code>▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁ &nbsp; S P E C T R U M &nbsp; ▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁</code></p>
   <table>
     <tr>
