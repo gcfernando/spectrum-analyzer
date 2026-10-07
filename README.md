@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>🎚️ Spectrum — Windows Audio Spectrum Visualizer</h1>
+  <h1>🎚️ Spectrum — Windows WASAPI Audio Spectrum Visualizer</h1>
   <p><strong>Real-time system-audio analysis with precise frequency-band measurement and multiple live visualizations.</strong></p>
   <p><code>▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁ &nbsp; S P E C T R U M &nbsp; ▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁</code></p>
   <table>
