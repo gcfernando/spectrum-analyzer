@@ -12,7 +12,7 @@
   </table>
   <p><strong>83 logarithmic bands</strong> · <strong>18 visualization modes</strong> · <strong>11 colour themes</strong> · <strong>up to 60 FPS</strong></p>
 </div>
-A .NET Framework 4.8 Windows Forms application that captures your system's audio output in real time and renders it as an animated frequency spectrum using 83 vertical bars. Audio capture is handled by BASS and BassWASAPI via Windows WASAPI loopback.
+A C# .NET Framework 4.8 Windows Forms application that captures your system's audio output in real time and renders it as an animated frequency spectrum using 83 vertical bars. Audio capture is handled by BASS and BassWASAPI via Windows WASAPI loopback, and an FFT-based band analyzer measures each bar in dBFS — so it works as both a **real-time audio visualizer for music** and a readable **C# FFT spectrum analyzer implementation** you can study, with a deterministic xUnit test suite.
 
 ---
 
@@ -247,20 +247,29 @@ The repository keeps capture/analysis, DSP, presentation ballistics, rendering, 
 
 ```text
 Spectrum/
-└── Spectrum/
-    ├── Analyzer.cs                  # Device handling, WASAPI capture, analysis scheduling, publication
-    ├── Dsp/                         # Measurement: FFT, band plan, band-power analyzer, dB scale, sample history
-    ├── BarBallistics.cs             # Time-based attack / release / peak-hold math used by the bars
-    ├── FormAudioSpectrum.cs         # Main form — renders bars, handles events
-    ├── FormAudioSpectrum.Designer.cs
-    ├── VerticalProgressBar.cs       # Custom control — one animated bar
-    ├── Ambiance Theme.cs            # Visual theme applied to the form
-    ├── Device.cs                    # WASAPI device descriptor
-    ├── Taskbar.cs                   # Windows taskbar progress state helper
-    ├── Program.cs                   # Entry point with single-instance mutex
-    ├── App.config                   # Mode configuration
-    ├── Ref_Files/                   # Bass.Net.dll, NAudio.dll, bass.dll, basswasapi.dll
-    └── Spectrum.csproj
+├── Spectrum.sln
+├── Spectrum/
+│   ├── Analyzer.cs                  # Device handling, WASAPI capture, analysis scheduling, publication
+│   ├── CaptureGate.cs               # Per-tick decision: analyze, publish silence, wait, or reset a hung stream
+│   ├── Dsp/                         # Measurement: FFT (RadixTwoFft), band plan, band-power analyzer, dB scale, sample history
+│   ├── BarBallistics.cs             # Time-based attack / release / peak-hold math used by the bars
+│   ├── FormAudioSpectrum.cs         # Main form — renders bars, handles events
+│   ├── FormAudioSpectrum.Designer.cs
+│   ├── VerticalProgressBar.cs       # Custom control — one animated bar
+│   ├── AdvancedVisualizationControl.cs, WaveSpectrumControl.cs, AmbientParticleFieldControl.cs
+│   │                                # Renderers for the non-bar visualization modes
+│   ├── VisualStyle.cs, VisualTheme.cs, BarColorThemes.cs
+│   │                                # Styles, themes, and colour palettes
+│   ├── VisualizerPreferences.cs     # Saved per-user mode/style/theme preferences
+│   ├── RotationSettingsForm.cs      # Fixed/Random rotation settings dialog (Ctrl+R)
+│   ├── Ambiance Theme.cs            # Visual theme applied to the form
+│   ├── Device.cs                    # WASAPI device descriptor
+│   ├── Taskbar.cs                   # Windows taskbar progress state helper
+│   ├── Program.cs                   # Entry point with single-instance mutex
+│   ├── App.config                   # Mode configuration
+│   ├── Ref_Files/                   # Bass.Net.dll, NAudio.dll, bass.dll, basswasapi.dll
+│   └── Spectrum.csproj
+└── Spectrum.Tests/                  # xUnit tests: FFT, band plan, stereo, timing, themes, performance
 ```
 
 ---
