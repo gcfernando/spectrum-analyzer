@@ -1,0 +1,24 @@
+# GitHub Pages documentation site; does not configure application deployment.
+url: "https://gcfernando.github.io"
+baseurl: "/spectrum-analyzer"
+title: "Spectrum Audio Analyzer"
+description: "Windows WASAPI audio spectrum analyzer in C# and Windows Forms, with 83 logarithmic bands, 18 visualization modes and 11 themes."
+lang: "en"
+plugins:
+  - jekyll-sitemap
+exclude:
+  - packages
+  - bin
+  - obj
+  - node_modules
+  - vendor
+  - tests
+  - .claude
+  - .agents
+  - .codex
+defaults:
+  - scope:
+      path: "README.md"
+    values:
+      title: "The application runs as a 32-bit process; to test under x86:"
+      description: "Windows WASAPI audio spectrum analyzer in C# and Windows Forms, with 83 logarithmic bands, 18 visualization modes and 11 themes."
