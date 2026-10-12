@@ -1,4 +1,4 @@
-<div align="center">
+<div align="center" markdown="1">
   <h1>🎚️ Spectrum — Windows WASAPI Audio Spectrum Analyzer</h1>
   <p><strong>A .NET Framework Windows Forms visualizer for real-time system-audio analysis, with 83 logarithmic bands and 18 live visualization modes.</strong></p>
   <p><code>▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁ &nbsp; S P E C T R U M &nbsp; ▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁</code></p>
@@ -81,7 +81,7 @@ A C# .NET Framework 4.8 Windows Forms application that captures your system's au
 <a id="modes"></a>
 ## 🎛️ Visualization Modes
 
-<div align="center">
+<div align="center" markdown="1">
 
 `Spectrum` · `Bricks` · `LED` · `Dots` · `Wave` · `Lollipop` · `Waterfall` · `Radial Spectrum` · `Contour`
 
@@ -353,10 +353,16 @@ bars trail treble bars by roughly 0.1 s. This is the time/frequency trade-off of
 
 ---
 
-<div align="center">
+<div align="center" markdown="1">
 
 ### 🎚️ Spectrum
 
 **Windows Audio Spectrum Visualizer · .NET Framework 4.8 · WASAPI Loopback**
 
 </div>
+
+---
+
+## Documentation links
+
+[Read all Spectrum Audio Analyzer guides online](https://gcfernando.github.io/spectrum-analyzer/documentation/) · [Project overview](https://gcfernando.github.io/spectrum-analyzer/) · [All developer projects](https://gcfernando.github.io/gcfernando/projects/)

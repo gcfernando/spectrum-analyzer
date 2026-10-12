@@ -22,3 +22,9 @@ defaults:
     values:
       title: "The application runs as a 32-bit process; to test under x86:"
       description: "Windows WASAPI audio spectrum analyzer in C# and Windows Forms, with 83 logarithmic bands, 18 visualization modes and 11 themes."
+
+# Public documentation navigation and presentation.
+repository: gcfernando/spectrum-analyzer
+theme: jekyll-theme-primer
+projects_hub: https://gcfernando.github.io/gcfernando/projects/
+project_category: "Audio & desktop"
