@@ -80,15 +80,14 @@ public class VisualStyleTests
     [InlineData("Band Matrix")]
     [InlineData("Octave Spectrum")]
     [InlineData("Level Change")]
-    [InlineData("Orbit History")]
     [InlineData("Octave Waterfall")]
-    [InlineData("Level Change Map")]
-    [InlineData("Frequency Ribbon")]
+    [InlineData("Stereo Levels")]
+    [InlineData("Oscilloscope")]
+    [InlineData("Spectral Balance")]
     public void NewModesAreExposedAndHaveValidStyleChoices(string mode)
     {
         Assert.Contains(mode, GetVisualModes());
         Assert.Contains("None", VisualStyles.GetSupportedNames(mode));
-        Assert.Contains("Scanline", VisualStyles.GetSupportedNames(mode));
         Assert.Contains("Precision", VisualStyles.GetSupportedNames(mode));
         Assert.DoesNotContain("Trail", VisualStyles.GetSupportedNames(mode));
     }
@@ -107,14 +106,20 @@ public class VisualStyleTests
     }
 
     [Theory]
-    [InlineData("Spectral Flux", "Level Change")]
-    [InlineData("Transient Map", "Level Change Map")]
-    public void LegacyDerivedModeNamesMigrateToAccurateLabels(string legacyName, string expectedName)
+    [InlineData("Spectral Flux", "Level Change", "None")]
+    [InlineData("Transient Map", "Level Change", "None")]
+    [InlineData("Dots", "LED", "None")]
+    [InlineData("Lollipop", "Spectrum", "Trail")]
+    [InlineData("Wave", "Contour", "None")]
+    [InlineData("Orbit History", "Peak Trace", "None")]
+    [InlineData("Level Change Map", "Level Change", "None")]
+    [InlineData("Frequency Ribbon", "Peak Trace", "None")]
+    public void LegacyDerivedModeNamesMigrateToAccurateLabels(string legacyName, string expectedName, string expectedStyle)
     {
         FormAudioSpectrum.ResolveConfiguredVisualState(legacyName, "Trail", out var mode, out var style);
 
         Assert.Equal(expectedName, mode);
-        Assert.Equal("None", style);
+        Assert.Equal(expectedStyle, style);
     }
 
     private static string[] GetVisualModes() =>

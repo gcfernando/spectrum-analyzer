@@ -18,6 +18,9 @@ public sealed class OnChangeEventArgs : EventArgs
 {
     public IReadOnlyList<byte> Spectrumdata { get; }
     public OnChangeEventArgs(byte[] spectrumdata) => Spectrumdata = spectrumdata;
+    internal AudioVisualizationData Audio { get; }
+    internal BandPlan Plan { get; set; }
+    internal OnChangeEventArgs(byte[] spectrumdata, AudioVisualizationData audio) : this(spectrumdata) => Audio = audio;
 }
 
 public sealed class Analyzer : IDisposable
@@ -45,6 +48,8 @@ public sealed class Analyzer : IDisposable
     private readonly Timer _timer;
     private readonly byte[] _spectrumData;
     private readonly double[] _bandPower;
+    private readonly double[] _leftBandPower = new double[LINES];
+    private readonly double[] _rightBandPower = new double[LINES];
 
     // Replaced atomically whenever capture restarts; records analysis state and its starting frame count.
     private volatile CaptureStream _stream;
@@ -62,6 +67,7 @@ public sealed class Analyzer : IDisposable
 
     private readonly byte[] _fireData;
     private readonly OnChangeEventArgs _fireEventArgs;
+    private readonly AudioVisualizationData _audioData = new();
 
     private readonly WASAPIPROC _process;
     private static readonly object _sender = new();
@@ -96,7 +102,7 @@ public sealed class Analyzer : IDisposable
         _bandPower = new double[LINES];
 
         _fireData = new byte[LINES];
-        _fireEventArgs = new OnChangeEventArgs(_fireData);
+        _fireEventArgs = new OnChangeEventArgs(_fireData, _audioData);
 
         _stream = new CaptureStream(AnalysisState.Create(_sampleRate, 2));
 
@@ -377,10 +383,10 @@ public sealed class Analyzer : IDisposable
             switch (decision.Action)
             {
                 case CaptureAction.Analyze:
-                    AnalyzeAndFire(state);
+                    AnalyzeAndFire(state, stream);
                     break;
                 case CaptureAction.PublishSilence:
-                    PublishSilence();
+                    PublishSilence(state, level >= 0, stream);
                     break;
             }
 
@@ -416,21 +422,39 @@ public sealed class Analyzer : IDisposable
     }
 
     // Publish the floor and let presentation ballistics decay the bars.
-    private void PublishSilence()
+    private void PublishSilence(AnalysisState state, bool validCaptureLevel, CaptureStream stream)
     {
         Array.Clear(_spectrumData, 0, LINES);
+        // Quiet flowing PCM still contains valid time-domain measurements. A gap or native error
+        // must leave PCM unavailable rather than relabeling old samples as current silence.
+        var frames = state.Engine.RequiredFrames;
+        if (validCaptureLevel && state.History.TryCopyLatest(state.Snapshot, frames, out var endFrame, _gate.GapEndFrame))
+        {
+            _audioData.UpdateObservedWindow(state.Snapshot, frames, state.History.Channels, state.SampleRate,
+                endFrame, state.AudioEndFrame, _gate.GapEndFrame, stream);
+            state.AudioEndFrame = endFrame;
+            _audioData.SetChannelSpectrum(null, null);
+        }
+        else
+            _audioData.SetUnavailableWindow(state.History.TotalFrames, state.History.Channels, state.SampleRate, stream);
+        _fireEventArgs.Plan = state.Engine.Plan;
         FireOnChange();
     }
 
-    private void AnalyzeAndFire(AnalysisState state)
+    private void AnalyzeAndFire(AnalysisState state, CaptureStream stream)
     {
         var frames = state.Engine.RequiredFrames;
-        if (!state.History.TryCopyLatest(state.Snapshot, frames, out _, _gate.GapEndFrame))
+        if (!state.History.TryCopyLatest(state.Snapshot, frames, out var endFrame, _gate.GapEndFrame))
         {
             return; // Keep the previous complete frame if the producer overwrote this snapshot.
         }
 
-        state.Engine.Analyze(state.Snapshot, frames, _bandPower);
+        state.Engine.Analyze(state.Snapshot, frames, _bandPower, _leftBandPower, _rightBandPower);
+        _audioData.UpdateObservedWindow(state.Snapshot, frames, state.History.Channels, state.SampleRate,
+            endFrame, state.AudioEndFrame, _gate.GapEndFrame, stream);
+        _audioData.SetChannelSpectrum(_leftBandPower, _rightBandPower);
+        state.AudioEndFrame = endFrame;
+        _fireEventArgs.Plan = state.Engine.Plan;
 
         for (var i = 0; i < LINES; i++)
         {
@@ -700,6 +724,7 @@ public sealed class Analyzer : IDisposable
 
         // Used only by the analysis thread.
         public float[] Snapshot { get; }
+        public long AudioEndFrame { get; set; }
 
         public static AnalysisState Create(int sampleRate, int channels)
         {
@@ -733,5 +758,210 @@ public sealed class Analyzer : IDisposable
         public void OnDeviceRemoved(string deviceId) { }
         public void OnDeviceStateChanged(string deviceId, NAudio.CoreAudioApi.DeviceState newState) { }
         public void OnPropertyValueChanged(string pwstrDeviceId, NAudio.CoreAudioApi.PropertyKey key) { }
+    }
+}
+
+/// <summary>Owns a bounded copy of real front-channel PCM and sample peak/RMS values for one observed sample window.</summary>
+internal sealed class AudioVisualizationData
+{
+    internal const int MaximumWaveSamples = 2048;
+    internal const int MaximumObservations = 1024;
+    internal readonly float[] Wave = new float[MaximumWaveSamples];
+    internal readonly byte[] LeftSpectrum = new byte[AdvancedVisualizationControl.BandCount];
+    internal readonly byte[] RightSpectrum = new byte[AdvancedVisualizationControl.BandCount];
+    private readonly AudioLevelObservation[] _observations = new AudioLevelObservation[MaximumObservations];
+    private int _observationWrite;
+    private int _historyRate;
+    private int _historyChannels;
+    internal int ObservationCount { get; private set; }
+    internal object SourceEpoch { get; private set; }
+    internal long EndFrame { get; private set; }
+    internal bool HasChannelSpectrum { get; private set; }
+    internal int WaveCount { get; private set; }
+    internal int SampleRate { get; private set; }
+    internal int Channels { get; private set; }
+    internal int WindowFrames { get; private set; }
+    internal double LeftPeak { get; private set; }
+    internal double RightPeak { get; private set; }
+    internal double LeftRms { get; private set; }
+    internal double RightRms { get; private set; }
+    internal bool HasSamples => WindowFrames > 0;
+    internal bool HasStereo => HasSamples && Channels >= 2;
+
+    internal void UpdateObservedWindow(float[] samples, int frames, int channels, int sampleRate,
+        long endFrame, long previousFrame, long gapEndFrame, object sourceEpoch = null)
+    {
+        var newFrames = (int)Math.Min(frames, Math.Max(0, endFrame - Math.Max(previousFrame, gapEndFrame)));
+        UpdateWindow(samples, frames, channels, sampleRate, newFrames, endFrame, sourceEpoch);
+    }
+
+    internal void Update(float[] samples, int frames, int channels, int sampleRate, int windowFrames = -1)
+    {
+        var count = windowFrames == -1 ? frames : windowFrames;
+        UpdateWindow(samples, frames, channels, sampleRate, count, EndFrame + Math.Max(0, count), null);
+    }
+
+    private void UpdateWindow(float[] samples, int frames, int channels, int sampleRate, int count,
+        long endFrame, object sourceEpoch)
+    {
+        if (samples == null) throw new ArgumentNullException(nameof(samples));
+        if (channels < 1) throw new ArgumentOutOfRangeException(nameof(channels));
+        if (sampleRate < 1) throw new ArgumentOutOfRangeException(nameof(sampleRate));
+        if (frames < 0 || (long)frames * channels > samples.Length) throw new ArgumentOutOfRangeException(nameof(frames));
+        if (count < 0 || count > frames) throw new ArgumentOutOfRangeException("windowFrames");
+        PrepareHistory(sampleRate, channels, sourceEpoch, endFrame);
+        ClearMeasurements();
+        SampleRate = sampleRate;
+        Channels = channels;
+        WindowFrames = count;
+        if (count == 0) { AppendObservation(endFrame, 0); return; }
+        double leftPower = 0, rightPower = 0;
+        WaveCount = Math.Min(count, MaximumWaveSamples);
+        var waveStart = frames - WaveCount;
+        for (var frame = frames - count; frame < frames; frame++)
+        {
+            var left = Finite(samples[frame * channels]);
+            var right = channels >= 2 ? Finite(samples[frame * channels + 1]) : 0;
+            LeftPeak = Math.Max(LeftPeak, Math.Abs((double)left));
+            RightPeak = Math.Max(RightPeak, Math.Abs((double)right));
+            leftPower += (double)left * left;
+            rightPower += (double)right * right;
+            if (frame >= waveStart) Wave[frame - waveStart] = left;
+        }
+        LeftRms = Math.Sqrt(leftPower / count);
+        RightRms = Math.Sqrt(rightPower / count);
+        AppendObservation(endFrame, count);
+    }
+
+    internal AudioLevelObservation ObservationAt(int index)
+    {
+        if (index < 0 || index >= ObservationCount) throw new ArgumentOutOfRangeException(nameof(index));
+        return _observations[(_observationWrite - ObservationCount + index + MaximumObservations) % MaximumObservations];
+    }
+
+    private void PrepareHistory(int sampleRate, int channels, object sourceEpoch, long endFrame)
+    {
+        if (_historyRate != sampleRate || _historyChannels != channels ||
+            !ReferenceEquals(SourceEpoch, sourceEpoch) || endFrame < EndFrame)
+        {
+            ObservationCount = _observationWrite = 0;
+            _historyRate = sampleRate;
+            _historyChannels = channels;
+            SourceEpoch = sourceEpoch;
+        }
+    }
+
+    private void AppendObservation(long endFrame, int frames)
+    {
+        var start = endFrame - frames;
+        var previous = ObservationCount > 0 ? ObservationAt(ObservationCount - 1) : default;
+        EndFrame = endFrame;
+        // Repeated unavailable notifications at a stalled sample cursor add no invented duration.
+        if (ObservationCount > 0 && !HasSamples && !previous.Available && previous.EndFrame == endFrame) return;
+        _observations[_observationWrite] = new AudioLevelObservation(start, endFrame, LeftRms, LeftPeak,
+            RightRms, RightPeak, HasSamples, HasStereo,
+            ObservationCount > 0 && (!previous.Available || !HasSamples || start != previous.EndFrame));
+        _observationWrite = (_observationWrite + 1) % MaximumObservations;
+        ObservationCount = Math.Min(MaximumObservations, ObservationCount + 1);
+    }
+
+    internal void SetUnavailableWindow(long endFrame, int channels, int sampleRate, object sourceEpoch)
+    {
+        PrepareHistory(sampleRate, channels, sourceEpoch, endFrame);
+        ClearMeasurements();
+        SampleRate = sampleRate;
+        Channels = channels;
+        AppendObservation(endFrame, 0);
+    }
+
+    internal void SetChannelSpectrum(double[] leftPower, double[] rightPower)
+    {
+        if (leftPower != null && leftPower.Length < LeftSpectrum.Length) throw new ArgumentException("Expected 83 channel bands.", nameof(leftPower));
+        if (rightPower != null && rightPower.Length < RightSpectrum.Length) throw new ArgumentException("Expected 83 channel bands.", nameof(rightPower));
+        HasChannelSpectrum = HasSamples && leftPower != null && (!HasStereo || rightPower != null);
+        for (var band = 0; band < LeftSpectrum.Length; band++)
+        {
+            LeftSpectrum[band] = leftPower == null ? (byte)0 : LevelScale.ToDisplayByte(LevelScale.PowerToDb(leftPower[band]));
+            RightSpectrum[band] = rightPower == null || !HasStereo ? (byte)0 : LevelScale.ToDisplayByte(LevelScale.PowerToDb(rightPower[band]));
+        }
+    }
+
+    internal void CopyFrom(AudioVisualizationData source)
+    {
+        if (source == null) { Clear(); return; }
+        WaveCount = source.WaveCount;
+        SampleRate = source.SampleRate;
+        Channels = source.Channels;
+        WindowFrames = source.WindowFrames;
+        LeftPeak = source.LeftPeak;
+        RightPeak = source.RightPeak;
+        LeftRms = source.LeftRms;
+        RightRms = source.RightRms;
+        HasChannelSpectrum = source.HasChannelSpectrum;
+        SourceEpoch = source.SourceEpoch;
+        EndFrame = source.EndFrame;
+        ObservationCount = source.ObservationCount;
+        _observationWrite = source._observationWrite;
+        _historyRate = source._historyRate;
+        _historyChannels = source._historyChannels;
+        Array.Copy(source._observations, _observations, MaximumObservations);
+        Array.Copy(source.LeftSpectrum, LeftSpectrum, LeftSpectrum.Length);
+        Array.Copy(source.RightSpectrum, RightSpectrum, RightSpectrum.Length);
+        Array.Copy(source.Wave, Wave, WaveCount);
+        Array.Clear(Wave, WaveCount, Wave.Length - WaveCount);
+    }
+
+    internal void Clear()
+    {
+        ClearMeasurements();
+        ObservationCount = _observationWrite = _historyRate = _historyChannels = 0;
+        SourceEpoch = null;
+        EndFrame = 0;
+        Array.Clear(_observations, 0, MaximumObservations);
+    }
+
+    private void ClearMeasurements()
+    {
+        WaveCount = 0;
+        WindowFrames = 0;
+        Channels = 0;
+        SampleRate = 0;
+        LeftPeak = RightPeak = LeftRms = RightRms = 0;
+        HasChannelSpectrum = false;
+        Array.Clear(LeftSpectrum, 0, LeftSpectrum.Length);
+        Array.Clear(RightSpectrum, 0, RightSpectrum.Length);
+        Array.Clear(Wave, 0, Wave.Length);
+    }
+
+    internal static double AmplitudeToDb(double amplitude) =>
+        amplitude > 0 && !double.IsInfinity(amplitude) ? 20 * Math.Log10(amplitude) : LevelScale.SilenceDb;
+
+    private static float Finite(float sample) => float.IsNaN(sample) || float.IsInfinity(sample) ? 0 : sample;
+}
+
+/// <summary>One actually observed PCM interval. Missing intervals are breaks, never measured silence.</summary>
+internal readonly struct AudioLevelObservation
+{
+    internal AudioLevelObservation(long startFrame, long endFrame, double leftRms, double leftPeak,
+        double rightRms, double rightPeak, bool available, bool stereo, bool discontinuity)
+    {
+        StartFrame = startFrame; EndFrame = endFrame;
+        LeftRms = leftRms; LeftPeak = leftPeak; RightRms = rightRms; RightPeak = rightPeak;
+        Available = available; Stereo = stereo; Discontinuity = discontinuity;
+    }
+    internal long StartFrame { get; }
+    internal long EndFrame { get; }
+    internal double LeftRms { get; }
+    internal double LeftPeak { get; }
+    internal double RightRms { get; }
+    internal double RightPeak { get; }
+    internal bool Available { get; }
+    internal bool Stereo { get; }
+    internal bool Discontinuity { get; }
+    internal double CrestDb(int channel)
+    {
+        var rms = channel == 0 ? LeftRms : RightRms;
+        var peak = channel == 0 ? LeftPeak : RightPeak;
+        return Available && (channel == 0 || Stereo) && rms > 0 ? 20 * Math.Log10(peak / rms) : double.NaN;
     }
 }

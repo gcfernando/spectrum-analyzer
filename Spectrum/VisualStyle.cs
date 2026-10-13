@@ -20,6 +20,7 @@ internal static class VisualStyles
     private static readonly string[] s_ledStyles = { "None", "Pulse", "Scanline", "Precision" };
     private static readonly string[] s_fullStyles = { "None", "Pulse", "Glow", "Trail", "Scanline", "Precision" };
     private static readonly string[] s_advancedStyles = { "None", "Scanline", "Precision" };
+    private static readonly string[] s_measurementStyles = { "None", "Precision" };
 
     internal static string Resolve(string value)
     {
@@ -48,6 +49,18 @@ internal static class VisualStyles
 
     internal static string[] GetSupportedNames(string mode)
     {
+        if (string.Equals(mode, "Stereo Levels", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Stereo Spectrum", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Dynamics History", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Oscilloscope", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Spectral Balance", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Waterfall", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Octave Waterfall", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Radial Spectrum", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Band Matrix", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Octave Spectrum", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Level Change", StringComparison.OrdinalIgnoreCase))
+            return s_measurementStyles;
         if (string.Equals(mode, "Spectrum", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Wave", StringComparison.OrdinalIgnoreCase))
             return s_fullStyles;
@@ -83,8 +96,10 @@ internal static class VisualStyles
         string.Equals(mode, "Band Matrix", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Octave Spectrum", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Level Change", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(mode, "Orbit History", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Octave Waterfall", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(mode, "Level Change Map", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(mode, "Frequency Ribbon", StringComparison.OrdinalIgnoreCase);
+        string.Equals(mode, "Stereo Levels", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(mode, "Oscilloscope", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(mode, "Spectral Balance", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(mode, "Stereo Spectrum", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(mode, "Dynamics History", StringComparison.OrdinalIgnoreCase);
 }

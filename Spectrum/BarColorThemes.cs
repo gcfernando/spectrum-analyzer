@@ -88,20 +88,20 @@ internal static class BarColorThemes
         peak: Color.FromArgb(211, 239, 248),
         intensityCurve: 1.5f, ui: s_neutralUi);
 
-    // Warm amber and orange tones echo the title-bar accent.
+    // Warm amber rises to pale gold, with lightness separating the analytical levels.
     public static readonly BarColorTheme Sunset = new(
         low: Color.FromArgb(181, 112, 54),
-        mid: Color.FromArgb(220, 143, 64),
-        high: Color.FromArgb(229, 107, 72),
-        peak: Color.FromArgb(247, 208, 160),
+        mid: Color.FromArgb(220, 166, 81),
+        high: Color.FromArgb(238, 209, 140),
+        peak: Color.FromArgb(248, 235, 205),
         intensityCurve: 1.5f, ui: s_neutralUi);
 
     // Cyan intensity ramp from dim to bright.
     public static readonly BarColorTheme MonoCyan = new(
         low: Color.FromArgb(48, 143, 164),
-        mid: Color.FromArgb(45, 177, 196),
-        high: Color.FromArgb(105, 211, 222),
-        peak: Color.FromArgb(204, 238, 239),
+        mid: Color.FromArgb(80, 188, 208),
+        high: Color.FromArgb(164, 223, 231),
+        peak: Color.FromArgb(236, 250, 251),
         intensityCurve: 1.4f, ui: s_neutralUi);
 
     // Retro gradient from purple through magenta to cyan.
@@ -112,51 +112,51 @@ internal static class BarColorThemes
         peak: Color.FromArgb(166, 215, 235),
         intensityCurve: 1.5f, ui: s_neutralUi);
 
-    // Aurora-inspired gradient from emerald through cyan to pale lavender.
+    // Aurora-inspired gradient from emerald through turquoise to pale blue and lavender.
     public static readonly BarColorTheme Aurora = new(
         low: Color.FromArgb(54, 151, 108),
-        mid: Color.FromArgb(48, 181, 156),
-        high: Color.FromArgb(108, 202, 202),
-        peak: Color.FromArgb(196, 214, 234),
+        mid: Color.FromArgb(67, 185, 188),
+        high: Color.FromArgb(179, 207, 235),
+        peak: Color.FromArgb(241, 236, 250),
         intensityCurve: 1.5f, ui: s_neutralUi);
 
     // Obsidian-inspired gold ramp with a pale-gold peak.
     public static readonly BarColorTheme ObsidianGold = new(
         low: Color.FromArgb(173, 137, 53),
-        mid: Color.FromArgb(204, 162, 50),
-        high: Color.FromArgb(235, 195, 86),
-        peak: Color.FromArgb(245, 232, 177),
+        mid: Color.FromArgb(211, 181, 100),
+        high: Color.FromArgb(235, 217, 155),
+        peak: Color.FromArgb(252, 243, 212),
         intensityCurve: 1.45f, ui: s_neutralUi);
 
-    // Saturated violet through cyan with a cool-white peak.
+    // Violet through lavender and cyan with a cool-white peak.
     public static readonly BarColorTheme MidnightPrism = new(
         low: Color.FromArgb(109, 111, 209),
-        mid: Color.FromArgb(126, 91, 207),
+        mid: Color.FromArgb(163, 151, 219),
         high: Color.FromArgb(61, 194, 224),
         peak: Color.FromArgb(202, 232, 241),
         intensityCurve: 1.45f, ui: s_neutralUi);
 
-    // Deep emerald through vivid jade with a mint-white peak.
+    // Emerald through jade and pale mint with a light cream peak.
     public static readonly BarColorTheme EmeraldNoir = new(
         low: Color.FromArgb(46, 156, 112),
-        mid: Color.FromArgb(33, 184, 130),
-        high: Color.FromArgb(88, 219, 159),
-        peak: Color.FromArgb(196, 237, 213),
+        mid: Color.FromArgb(108, 201, 151),
+        high: Color.FromArgb(181, 226, 178),
+        peak: Color.FromArgb(240, 247, 217),
         intensityCurve: 1.45f, ui: s_neutralUi);
 
-    // Dark crimson through rose with a soft blush peak.
+    // Muted crimson through rose and blush with a light warm peak.
     public static readonly BarColorTheme CrimsonVelvet = new(
-        low: Color.FromArgb(192, 85, 111),
-        mid: Color.FromArgb(211, 69, 103),
-        high: Color.FromArgb(235, 112, 134),
-        peak: Color.FromArgb(244, 203, 211),
+        low: Color.FromArgb(184, 101, 131),
+        mid: Color.FromArgb(224, 145, 157),
+        high: Color.FromArgb(237, 180, 170),
+        peak: Color.FromArgb(250, 232, 218),
         intensityCurve: 1.45f, ui: s_neutralUi);
 
     public static readonly BarColorTheme Studio = new(
         low: Color.FromArgb(48, 151, 176),
-        mid: Color.FromArgb(43, 181, 197),
-        high: Color.FromArgb(91, 202, 218),
-        peak: Color.FromArgb(177, 224, 230),
+        mid: Color.FromArgb(126, 171, 218),
+        high: Color.FromArgb(184, 202, 230),
+        peak: Color.FromArgb(236, 244, 250),
         intensityCurve: 1.45f, ui: s_studioUi);
 
     public static BarColorTheme Resolve(string name) => (name ?? string.Empty).Trim().ToLowerInvariant() switch

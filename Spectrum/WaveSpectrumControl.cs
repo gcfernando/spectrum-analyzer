@@ -60,6 +60,16 @@ internal sealed class WaveSpectrumControl : Control
         Invalidate();
     }
 
+    internal void SynchronizeSpectrum(byte[] values)
+    {
+        SetSpectrum(values);
+        for (var i = 0; i < _levels.Length; i++)
+            _levels[i] = _targets[i];
+        _hasTrail = false;
+        _timer.Stop();
+        Invalidate();
+    }
+
     internal void SetTheme(BarColorTheme theme)
     {
         _lowColor = theme.Low;

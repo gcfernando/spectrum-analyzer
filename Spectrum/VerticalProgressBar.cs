@@ -35,6 +35,8 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private int _lastDisplayQ = int.MinValue;
     private int _lastPeakQ = int.MinValue;
+    private Color _lastDisplayColor = Color.Empty;
+    private Color _lastPeakColor = Color.Empty;
     private VisualizationMode _lastModeQ = (VisualizationMode)(-1);
 
     private readonly List<Rectangle> _brickRects = new(256);
@@ -63,6 +65,7 @@ public sealed class VerticalProgressBar : ProgressBar
     private readonly Pen _highlightPen = new(Color.FromArgb(170, 255, 255, 255), 1f);
 
     private readonly SolidBrush _peakBrush = new(Color.White);
+    private readonly Pen _peakOutlinePen = new(Color.Black, 1f);
 
     private readonly Pen _gridlinePen = new(Color.FromArgb(26, 205, 218, 231), 1f);
 
@@ -359,6 +362,7 @@ public sealed class VerticalProgressBar : ProgressBar
             _innerEdgePen?.Dispose();
             _highlightPen?.Dispose();
             _peakBrush?.Dispose();
+            _peakOutlinePen?.Dispose();
             _gridlinePen?.Dispose();
             _workBrush?.Dispose();
             _brickShadeBrush?.Dispose();
@@ -499,11 +503,20 @@ public sealed class VerticalProgressBar : ProgressBar
         else if (VisualStyle == VisualStyle.Precision)
             DrawPrecisionGrid(e.Graphics, innerX, innerW, topInner, bottomInner, innerH);
 
+        var topEdge = mode == VisualizationMode.Center || mode == VisualizationMode.Mirror
+            ? topInner + (innerH / 2)
+            : bottomInner - filledH;
+        if (mode != VisualizationMode.Led && mode != VisualizationMode.Dots && mode != VisualizationMode.Lollipop &&
+            filledH > 1 && topEdge >= topInner && topEdge <= bottomInner)
+            e.Graphics.DrawLine(_highlightPen, innerX, topEdge, innerX + innerW - 1, topEdge);
+
+        // Draw peaks last so styles and active-edge highlights cannot conceal them.
         // Hide the peak marker at the floor to avoid a row of markers during silence.
         if (PeakHoldEnabled && ModeHasPeakMarker(mode) && _peakValue > Minimum + 0.5f)
         {
             var peakPercent = Clamp01((Clamp(_peakValue, Minimum, Maximum) - Minimum) / range);
             _peakBrush.Color = GetPeakColor(peakPercent);
+            _peakOutlinePen.Color = BackColor;
 
             if (mode == VisualizationMode.Dots)
                 DrawPeakMarker_Dot(e.Graphics, bounds, innerX, innerW, topInner, bottomInner, innerH, range);
@@ -512,31 +525,19 @@ public sealed class VerticalProgressBar : ProgressBar
             else
                 DrawPeakMarker_Line(e.Graphics, innerX, innerW, topInner, bottomInner, innerH, range);
         }
-
-        var topEdge = mode == VisualizationMode.Center || mode == VisualizationMode.Mirror
-            ? topInner + (innerH / 2)
-            : bottomInner - filledH;
-        if (mode != VisualizationMode.Led && mode != VisualizationMode.Dots && mode != VisualizationMode.Lollipop &&
-            filledH > 1 && topEdge >= topInner && topEdge <= bottomInner)
-            e.Graphics.DrawLine(_highlightPen, innerX, topEdge, innerX + innerW - 1, topEdge);
     }
 
     private void ConfigureGraphicsQuality(Graphics g)
     {
-        if (HighQualityRendering)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.CompositingQuality = CompositingQuality.HighQuality;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        }
-        else
-        {
-            g.SmoothingMode = SmoothingMode.None;
-            g.PixelOffsetMode = PixelOffsetMode.None;
-            g.CompositingQuality = CompositingQuality.HighSpeed;
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
-        }
+        var smoothing = HighQualityRendering ? SmoothingMode.AntiAlias : SmoothingMode.None;
+        var pixelOffset = HighQualityRendering ? PixelOffsetMode.HighQuality : PixelOffsetMode.None;
+        var compositing = HighQualityRendering ? CompositingQuality.HighQuality : CompositingQuality.HighSpeed;
+        var interpolation = HighQualityRendering ? InterpolationMode.HighQualityBicubic : InterpolationMode.NearestNeighbor;
+        // Framework quality setters validate/box enum values. Avoid repeating them on an already configured context.
+        if (g.SmoothingMode != smoothing) g.SmoothingMode = smoothing;
+        if (g.PixelOffsetMode != pixelOffset) g.PixelOffsetMode = pixelOffset;
+        if (g.CompositingQuality != compositing) g.CompositingQuality = compositing;
+        if (g.InterpolationMode != interpolation) g.InterpolationMode = interpolation;
     }
 
     private void DrawMode_Bricks(Graphics g, Rectangle bounds)
@@ -883,13 +884,18 @@ public sealed class VerticalProgressBar : ProgressBar
         var peakPercent = Clamp01((pv - Minimum) / range);
         var peakY = bottomInner - (int)Math.Round(innerH * peakPercent);
 
-        var thickness = Math.Max(1, PeakLineThickness);
+        var thickness = Math.Min(innerH, Math.Max(1, PeakLineThickness));
         var half = thickness / 2;
 
         var peakRect = new Rectangle(innerX, peakY - half, innerW, thickness);
         if (peakRect.Top < topInner) peakRect.Y = topInner;
         if (peakRect.Bottom > bottomInner) peakRect.Y = bottomInner - thickness;
 
+        // A one-pixel surface separator remains visible when the fill and marker are both pale.
+        var separatorTop = Math.Max(topInner, peakRect.Top - 1);
+        var separatorBottom = Math.Min(bottomInner, peakRect.Bottom + 1);
+        _workBrush.Color = BackColor;
+        g.FillRectangle(_workBrush, innerX, separatorTop, innerW, separatorBottom - separatorTop);
         g.FillRectangle(_peakBrush, peakRect);
     }
 
@@ -910,6 +916,8 @@ public sealed class VerticalProgressBar : ProgressBar
         if (y + dotSize > bottomInner) y = bottomInner - dotSize;
 
         g.FillEllipse(_peakBrush, x, y, dotSize, dotSize);
+        if (dotSize >= 4)
+            g.DrawEllipse(_peakOutlinePen, x, y, dotSize - 1, dotSize - 1);
     }
 
     private void DrawPeakMarker_Lollipop(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH, float range)
@@ -923,6 +931,10 @@ public sealed class VerticalProgressBar : ProgressBar
         var tickHeight = Math.Min(innerH + 1, Math.Max(1, PeakLineThickness));
         var tickX = innerX + ((innerW - tickWidth) / 2);
         var tickY = Clamp(peakY - (tickHeight / 2), topInner, bottomInner - tickHeight + 1);
+        var separator = Rectangle.Intersect(new Rectangle(tickX - 1, tickY - 1, tickWidth + 2, tickHeight + 2),
+            new Rectangle(innerX, topInner, innerW, innerH));
+        _workBrush.Color = BackColor;
+        g.FillRectangle(_workBrush, separator);
         g.FillRectangle(_peakBrush, tickX, tickY, tickWidth, tickHeight);
     }
 
@@ -1108,14 +1120,22 @@ public sealed class VerticalProgressBar : ProgressBar
     private bool ComputeShouldInvalidate(VisualizationMode mode)
     {
         var dq = ComputeRenderKey(mode, out var pq, out var filledH);
+        var range = Math.Max(1, Maximum - Minimum);
+        var displayColor = mode is VisualizationMode.Spectrum or VisualizationMode.Wave or VisualizationMode.Lollipop
+            ? GetLevelColor(Clamp01((_displayValue - Minimum) / range)) : Color.Empty;
+        var peakColor = pq >= 0 ? GetPeakColor(Clamp01((_peakValue - Minimum) / range)) : Color.Empty;
 
         var changed =
             dq != _lastDisplayQ ||
             pq != _lastPeakQ ||
+            displayColor != _lastDisplayColor ||
+            peakColor != _lastPeakColor ||
             mode != _lastModeQ;
 
         _lastDisplayQ = dq;
         _lastPeakQ = pq;
+        _lastDisplayColor = displayColor;
+        _lastPeakColor = peakColor;
         _lastModeQ = mode;
 
         return changed;

@@ -15,7 +15,7 @@ internal sealed class RotationSettingsForm : Form
     public RotationSettingsForm(bool randomEnabled, int intervalMinutes, BarColorTheme theme)
     {
         var ui = theme.Ui;
-        Text = "Mode and Theme Rotation";
+        Text = "Mode, Style and Theme Rotation";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
@@ -65,7 +65,7 @@ internal sealed class RotationSettingsForm : Form
         var fixedDescription = new Label
         {
             AutoSize = false,
-            Text = "Keep your selected mode and theme unchanged.",
+            Text = "Keep your selected mode, style and theme.",
             Location = new Point(45, 108),
             Size = new Size(300, 20),
             ForeColor = ui.SecondaryText
@@ -83,7 +83,7 @@ internal sealed class RotationSettingsForm : Form
         var randomDescription = new Label
         {
             AutoSize = false,
-            Text = "Automatically select a new mode and theme together.",
+            Text = "Select a new mode, style and theme together.",
             Location = new Point(45, 153),
             Size = new Size(320, 20),
             ForeColor = ui.SecondaryText

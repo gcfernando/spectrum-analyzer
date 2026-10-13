@@ -30,13 +30,19 @@ public class AdvancedVisualizationControlTests
                 AdvancedVisualizationMode.OrbitHistory,
                 AdvancedVisualizationMode.OctaveWaterfall,
                 AdvancedVisualizationMode.TransientMap,
-                AdvancedVisualizationMode.FrequencyRibbon
+                AdvancedVisualizationMode.FrequencyRibbon,
+                AdvancedVisualizationMode.StereoLevels,
+                AdvancedVisualizationMode.Oscilloscope,
+                AdvancedVisualizationMode.SpectralBalance,
+                AdvancedVisualizationMode.StereoSpectrum,
+                AdvancedVisualizationMode.DynamicsHistory
             };
             var values = new byte[AdvancedVisualizationControl.BandCount];
             for (var i = 0; i < values.Length; i++)
                 values[i] = (byte)(64 + ((i * 191) / (values.Length - 1)));
 
             using var control = new AdvancedVisualizationControl();
+            control.SetAudioSamples(new[] { 0.2f, -0.4f, -0.3f, 0.6f, 0.1f, 0.1f, 0.5f, -0.2f }, 4, 2, 48000);
             foreach (var size in new[] { new Size(320, 180), new Size(70, 42) })
             {
                 control.Size = size;
@@ -84,14 +90,16 @@ public class AdvancedVisualizationControlTests
             {
                 AdvancedVisualizationMode.Waterfall, AdvancedVisualizationMode.RadialSpectrum, AdvancedVisualizationMode.Contour,
                 AdvancedVisualizationMode.PeakTrace, AdvancedVisualizationMode.ThresholdMonitor, AdvancedVisualizationMode.BandMatrix,
-                AdvancedVisualizationMode.OctaveSpectrum, AdvancedVisualizationMode.SpectralFlux, AdvancedVisualizationMode.OrbitHistory,
-                AdvancedVisualizationMode.OctaveWaterfall, AdvancedVisualizationMode.TransientMap, AdvancedVisualizationMode.FrequencyRibbon
+                AdvancedVisualizationMode.OctaveSpectrum, AdvancedVisualizationMode.SpectralFlux, AdvancedVisualizationMode.OctaveWaterfall,
+                AdvancedVisualizationMode.StereoLevels, AdvancedVisualizationMode.Oscilloscope, AdvancedVisualizationMode.SpectralBalance,
+                AdvancedVisualizationMode.StereoSpectrum, AdvancedVisualizationMode.DynamicsHistory
             };
             var values = new byte[AdvancedVisualizationControl.BandCount];
             for (var band = 0; band < values.Length; band++)
                 values[band] = (byte)(1 + ((band * 254) / (values.Length - 1)));
 
             using var control = new AdvancedVisualizationControl { Size = new Size(220, 120) };
+            control.SetAudioSamples(new[] { 0.2f, -0.4f, -0.3f, 0.6f, 0.1f, 0.1f, 0.5f, -0.2f }, 4, 2, 48000);
             foreach (var mode in modes)
             {
                 foreach (var theme in BarColorThemes.Names)
@@ -316,6 +324,11 @@ public class AdvancedVisualizationControlTests
         AdvancedVisualizationMode.OctaveWaterfall => "Octave Waterfall",
         AdvancedVisualizationMode.TransientMap => "Level Change Map",
         AdvancedVisualizationMode.FrequencyRibbon => "Frequency Ribbon",
+        AdvancedVisualizationMode.StereoLevels => "Stereo Levels",
+        AdvancedVisualizationMode.Oscilloscope => "Oscilloscope",
+        AdvancedVisualizationMode.SpectralBalance => "Spectral Balance",
+        AdvancedVisualizationMode.StereoSpectrum => "Stereo Spectrum",
+        AdvancedVisualizationMode.DynamicsHistory => "Dynamics History",
         _ => mode.ToString()
     };
 

@@ -145,6 +145,12 @@ internal sealed class BandSpectrumAnalyzer
 
     /// <summary>Analyzes recent interleaved frames and writes each band's power relative to a full-scale sine.</summary>
     public void Analyze(float[] interleaved, int frameCount, double[] relativeBandPower)
+        => Analyze(interleaved, frameCount, relativeBandPower, null, null);
+
+    /// <summary>Also writes optional independent front-channel band powers with the same full-scale-sine calibration.</summary>
+    /// <remarks>Output buffers must be distinct. Mono has measured left power and zero right power; additional device channels are excluded.</remarks>
+    public void Analyze(float[] interleaved, int frameCount, double[] relativeBandPower,
+        double[] leftRelativeBandPower, double[] rightRelativeBandPower)
     {
         if (interleaved == null)
         {
@@ -156,6 +162,16 @@ internal sealed class BandSpectrumAnalyzer
             throw new ArgumentException("Output must hold one value per band.", nameof(relativeBandPower));
         }
 
+        if (leftRelativeBandPower != null && leftRelativeBandPower.Length < Plan.Count)
+            throw new ArgumentException("Output must hold one value per band.", nameof(leftRelativeBandPower));
+        if (rightRelativeBandPower != null && rightRelativeBandPower.Length < Plan.Count)
+            throw new ArgumentException("Output must hold one value per band.", nameof(rightRelativeBandPower));
+        if (leftRelativeBandPower != null && ReferenceEquals(relativeBandPower, leftRelativeBandPower))
+            throw new ArgumentException("Output buffers must be distinct.", nameof(leftRelativeBandPower));
+        if (rightRelativeBandPower != null && (ReferenceEquals(relativeBandPower, rightRelativeBandPower) ||
+            ReferenceEquals(leftRelativeBandPower, rightRelativeBandPower)))
+            throw new ArgumentException("Output buffers must be distinct.", nameof(rightRelativeBandPower));
+
         if (frameCount < RequiredFrames || (long)frameCount * Channels > interleaved.Length)
         {
             throw new ArgumentOutOfRangeException(nameof(frameCount), frameCount, "Not enough frames for the longest FFT.");
@@ -165,7 +181,8 @@ internal sealed class BandSpectrumAnalyzer
         {
             if (_resolutions[r].InUse)
             {
-                ComputeBinPower(_resolutions[r], interleaved, frameCount);
+                ComputeBinPower(_resolutions[r], interleaved, frameCount,
+                    leftRelativeBandPower != null || rightRelativeBandPower != null);
             }
         }
 
@@ -184,6 +201,26 @@ internal sealed class BandSpectrumAnalyzer
             var relative = sum / FullScaleSinePower;
             _lastRelativePower[b] = relative;
             relativeBandPower[b] = relative;
+
+            // Keep the original combined calculation unchanged. Independent outputs use the
+            // same frequency partition, without recovering either channel from the average.
+            if (AnalysedChannels == 1)
+            {
+                if (leftRelativeBandPower != null) leftRelativeBandPower[b] = relative;
+                if (rightRelativeBandPower != null) rightRelativeBandPower[b] = 0;
+            }
+            else if (leftRelativeBandPower != null || rightRelativeBandPower != null)
+            {
+                var resolution = _resolutions[_bandResolution[b]];
+                double leftSum = 0, rightSum = 0;
+                for (var i = 0; i < weights.Length; i++)
+                {
+                    if (leftRelativeBandPower != null) leftSum += weights[i] * resolution.LeftPower[first + i];
+                    if (rightRelativeBandPower != null) rightSum += weights[i] * resolution.RightPower[first + i];
+                }
+                if (leftRelativeBandPower != null) leftRelativeBandPower[b] = leftSum / FullScaleSinePower;
+                if (rightRelativeBandPower != null) rightRelativeBandPower[b] = rightSum / FullScaleSinePower;
+            }
         }
     }
 
@@ -237,7 +274,7 @@ internal sealed class BandSpectrumAnalyzer
         _bandWeights[band] = weights;
     }
 
-    private void ComputeBinPower(Resolution res, float[] interleaved, int frameCount)
+    private void ComputeBinPower(Resolution res, float[] interleaved, int frameCount, bool independentChannels)
     {
         var n = res.FftLength;
         var ch = Channels;
@@ -269,6 +306,7 @@ internal sealed class BandSpectrumAnalyzer
         var scale = 1.0 / (n * res.WindowSumOfSquares);
         var half = n / 2;
         power[0] = 0.0;
+        res.LeftPower[0] = res.RightPower[0] = 0.0;
 
         if (AnalysedChannels == 2)
         {
@@ -286,6 +324,11 @@ internal sealed class BandSpectrumAnalyzer
                 // Average channel powers and apply one-sided scaling except at Nyquist.
                 var oneSided = k == half ? 1.0 : 2.0;
                 power[k] = oneSided * 0.5 * (left + right) * scale;
+                if (independentChannels)
+                {
+                    res.LeftPower[k] = oneSided * left * scale;
+                    res.RightPower[k] = oneSided * right * scale;
+                }
             }
         }
         else
@@ -332,6 +375,8 @@ internal sealed class BandSpectrumAnalyzer
             Re = new double[fftLength];
             Im = new double[fftLength];
             Power = new double[(fftLength / 2) + 1];
+            LeftPower = new double[Power.Length];
+            RightPower = new double[Power.Length];
 
             // The periodic Hann window limits spectral leakage in signals with a wide dynamic range.
             for (var i = 0; i < length; i++)
@@ -353,5 +398,7 @@ internal sealed class BandSpectrumAnalyzer
         public double[] Re { get; }
         public double[] Im { get; }
         public double[] Power { get; }
+        public double[] LeftPower { get; }
+        public double[] RightPower { get; }
     }
 }
