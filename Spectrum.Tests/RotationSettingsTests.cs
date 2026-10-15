@@ -1,9 +1,11 @@
+// Developer :: > Gehan Fernando
 using System;
 using Spectrum;
 using Xunit;
 
 namespace Spectrum.Tests;
 
+// Basic checks on the rotation settings values and their defaults.
 public class RotationSettingsTests
 {
     [Theory]

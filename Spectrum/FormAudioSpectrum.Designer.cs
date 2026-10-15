@@ -1,4 +1,5 @@
-﻿namespace Spectrum
+﻿// Developer :: > Gehan Fernando
+namespace Spectrum
 {
     partial class FormAudioSpectrum
     {
@@ -50,7 +51,7 @@
             this.ambiance_ThemeSpectrum.Padding = new System.Windows.Forms.Padding(20, 56, 20, 16);
             this.ambiance_ThemeSpectrum.RoundCorners = true;
             this.ambiance_ThemeSpectrum.Sizable = false;
-            this.ambiance_ThemeSpectrum.Size = new System.Drawing.Size(1184, 378);
+            this.ambiance_ThemeSpectrum.Size = new System.Drawing.Size(1200, 480);
             this.ambiance_ThemeSpectrum.SmartBounds = true;
             this.ambiance_ThemeSpectrum.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
             this.ambiance_ThemeSpectrum.TabIndex = 0;
@@ -62,7 +63,7 @@
             this.ambiance_ControlBox.EnableMaximize = false;
             this.ambiance_ControlBox.Font = new System.Drawing.Font("Marlett", 7F);
             this.ambiance_ControlBox.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.ambiance_ControlBox.Location = new System.Drawing.Point(1132, 8);
+            this.ambiance_ControlBox.Location = new System.Drawing.Point(1148, 8);
             this.ambiance_ControlBox.Name = "ambiance_ControlBox";
             this.ambiance_ControlBox.Size = new System.Drawing.Size(44, 22);
             this.ambiance_ControlBox.TabIndex = 0;
@@ -73,7 +74,7 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.Black;
             this.BackgroundImageLayout = System.Windows.Forms.ImageLayout.None;
-            this.ClientSize = new System.Drawing.Size(1184, 378);
+            this.ClientSize = new System.Drawing.Size(1200, 480);
             this.Controls.Add(this.ambiance_ThemeSpectrum);
             this.Font = new System.Drawing.Font("Consolas", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;

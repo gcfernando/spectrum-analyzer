@@ -1,18 +1,19 @@
-﻿using System;
+﻿// Developer :: > Gehan Fernando
+using System;
 using System.Threading;
 using System.Windows.Forms;
 
 namespace Spectrum
 {
+    // App entry point, keeps things to a single running instance
     internal static class Program
     {
-        private static Mutex _mutex;
-
         [STAThread]
         private static void Main()
         {
+            // Named mutex is how we spot a second copy already running
             bool createdNew;
-            _mutex = new Mutex(true, "Spectrum_SingleInstance_Mutex", out createdNew);
+            using var mutex = new Mutex(true, "Spectrum_SingleInstance_Mutex", out createdNew);
 
             if (!createdNew)
             {
@@ -24,8 +25,23 @@ namespace Spectrum
                 return;
             }
 
+            try
+            {
+                RunApplication();
+            }
+            finally
+            {
+                // Always release, even if the app blows up
+                mutex.ReleaseMutex();
+            }
+        }
+
+        // Wires up global error dialogs, then starts the main window
+        private static void RunApplication()
+        {
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // Route UI-thread exceptions to our handler instead of the default crash dialog
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
 
             Application.ThreadException += (s, e) =>
@@ -37,6 +53,7 @@ namespace Spectrum
                     MessageBoxIcon.Error);
             };
 
+            // Last-resort catch for exceptions from background threads
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
                 MessageBox.Show(
@@ -47,7 +64,6 @@ namespace Spectrum
             };
 
             Application.Run(new FormAudioSpectrum());
-            _mutex.ReleaseMutex();
         }
     }
 }

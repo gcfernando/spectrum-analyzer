@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using Spectrum.Dsp;
 using Xunit;
@@ -5,7 +6,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
-/// <summary>Continuous capture → history → snapshot → analysis chain; steady tones must stay narrow.</summary>
+// Full capture -> history -> snapshot -> analysis chain; a steady tone has to stay narrow, even with jitter and dropouts.
 public class StreamingPipelineTests
 {
     private readonly ITestOutputHelper _out;
@@ -17,7 +18,7 @@ public class StreamingPipelineTests
     {
         const int fs = 48000;
         const int channels = 2;
-        const double amp = 0.1; // −20 dBFS
+        const double amp = 0.1;
         var engine = Signals.DefaultEngine(fs, channels);
         const int band = 46;
         var hz = engine.Plan[band].CenterHz;
@@ -35,7 +36,7 @@ public class StreamingPipelineTests
 
         while (written < fs * 10L)
         {
-            var frames = rng.Next(400, 701); // Callback sizes seen with a 10 ms WASAPI period.
+            var frames = rng.Next(400, 701);
             for (var i = 0; i < frames; i++)
             {
                 var s = (float)(amp * Math.Sin(2 * Math.PI * hz * (written + i) / fs));
@@ -51,7 +52,7 @@ public class StreamingPipelineTests
                 continue;
             }
 
-            nextAnalysis += 1520 + rng.Next(-60, 61); // ~31.7 ms tick with jitter.
+            nextAnalysis += 1520 + rng.Next(-60, 61);
             Assert.True(history.TryCopyLatest(snapshot, engine.RequiredFrames, out _));
             engine.Analyze(snapshot, engine.RequiredFrames, power);
             analyses++;
@@ -83,13 +84,13 @@ public class StreamingPipelineTests
     [Fact]
     public void SingleDroppedPacket_ProducesTheObservedSkirt()
     {
-        // One missing 480-frame packet inside the window.
+        // Drop one 480-frame packet inside the window and see how the tone copes.
         const int fs = 48000;
         var engine = Signals.DefaultEngine(fs, 2);
         const int band = 46;
         var hz = engine.Plan[band].CenterHz;
         var n = engine.RequiredFrames;
-        const int dropAt = 16384 - 2000; // Inside the shortest 4096-frame window.
+        const int dropAt = 16384 - 2000;
         var buf = Signals.Interleaved(n, 2, (_, i) => 0.1 * Math.Sin(2 * Math.PI * hz * (i < dropAt ? i : i + 480) / fs));
         var db = Signals.AnalyzeDb(engine, buf);
         var far = 0;

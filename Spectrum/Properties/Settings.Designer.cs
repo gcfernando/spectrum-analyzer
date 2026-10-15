@@ -8,6 +8,7 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
+// Developer :: > Gehan Fernando
 namespace Spectrum.Properties {
     
     

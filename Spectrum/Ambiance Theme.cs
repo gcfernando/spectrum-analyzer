@@ -1,7 +1,7 @@
-﻿#region Imports
+﻿// Developer :: > Gehan Fernando
+#region Imports
 
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -64,7 +64,7 @@ public class Ambiance_ThemeContainer : ContainerControl
     private Rectangle HeaderRect;
     protected MouseState State;
     private readonly int MoveHeight;
-    private Point MouseP = new Point(0, 0);
+    private Point MouseP = new(0, 0);
     private bool Cap = false;
     private bool HasShown;
 
@@ -72,28 +72,26 @@ public class Ambiance_ThemeContainer : ContainerControl
 
     public bool SmartBounds { get; set; } = true;
 
-    private bool _RoundCorners = true;
     public bool RoundCorners
     {
-        get => _RoundCorners;
+        get;
         set
         {
-            _RoundCorners = value;
+            field = value;
             Invalidate();
         }
-    }
+    } = true;
 
     protected bool IsParentForm { get; private set; }
 
     protected bool IsParentMdi => Parent != null && Parent.Parent != null;
 
-    private bool _ControlMode;
     protected bool ControlMode
     {
-        get => _ControlMode;
+        get;
         set
         {
-            _ControlMode = value;
+            field = value;
             Invalidate();
         }
     }
@@ -101,12 +99,12 @@ public class Ambiance_ThemeContainer : ContainerControl
     private FormStartPosition _StartPosition = FormStartPosition.CenterScreen;
     public FormStartPosition StartPosition
     {
-        get => IsParentForm && !_ControlMode ? ParentForm.StartPosition : _StartPosition;
+        get => IsParentForm && !ControlMode ? ParentForm.StartPosition : _StartPosition;
         set
         {
             _StartPosition = value;
 
-            if (IsParentForm && !_ControlMode)
+            if (IsParentForm && !ControlMode)
             {
                 ParentForm.StartPosition = value;
             }
@@ -123,7 +121,7 @@ public class Ambiance_ThemeContainer : ContainerControl
         }
         IsParentForm = Parent is Form;
 
-        if (!_ControlMode)
+        if (!ControlMode)
         {
             InitializeMessages();
 
@@ -145,7 +143,7 @@ public class Ambiance_ThemeContainer : ContainerControl
     protected sealed override void OnSizeChanged(EventArgs e)
     {
         base.OnSizeChanged(e);
-        if (!_ControlMode)
+        if (!ControlMode)
         {
             HeaderRect = new Rectangle(0, 0, Width - 14, MoveHeight - 7);
         }
@@ -155,11 +153,13 @@ public class Ambiance_ThemeContainer : ContainerControl
     protected override void OnMouseDown(System.Windows.Forms.MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        if (e.Button == MouseButtons.Left)
+        if (e.Button != MouseButtons.Left)
         {
-            SetState(MouseState.Down);
+            return;
         }
-        if (!((IsParentForm && ParentForm.WindowState == FormWindowState.Maximized) || _ControlMode))
+
+        SetState(MouseState.Down);
+        if (!((IsParentForm && ParentForm.WindowState == FormWindowState.Maximized) || ControlMode))
         {
             if (HeaderRect.Contains(e.Location))
             {
@@ -187,7 +187,7 @@ public class Ambiance_ThemeContainer : ContainerControl
         base.OnMouseMove(e);
         if (!(IsParentForm && ParentForm.WindowState == FormWindowState.Maximized))
         {
-            if (Sizable && !_ControlMode)
+            if (Sizable && !ControlMode)
             {
                 InvalidateMouse();
             }
@@ -201,7 +201,7 @@ public class Ambiance_ThemeContainer : ContainerControl
     protected override void OnInvalidated(System.Windows.Forms.InvalidateEventArgs e)
     {
         base.OnInvalidated(e);
-        ParentForm.Text = Text;
+        ParentForm?.Text = Text;
     }
 
     protected override void OnPaintBackground(PaintEventArgs e) => base.OnPaintBackground(e);
@@ -214,12 +214,12 @@ public class Ambiance_ThemeContainer : ContainerControl
 
     private void FormShown(object sender, EventArgs e)
     {
-        if (_ControlMode || HasShown)
+        if (ControlMode || HasShown)
         {
             return;
         }
 
-        if (_StartPosition == FormStartPosition.CenterParent || _StartPosition == FormStartPosition.CenterScreen)
+        if (_StartPosition is FormStartPosition.CenterParent or FormStartPosition.CenterScreen)
         {
             var SB = Screen.PrimaryScreen.Bounds;
             var CB = ParentForm.Bounds;
@@ -247,11 +247,7 @@ public class Ambiance_ThemeContainer : ContainerControl
         B3 = GetIndexPoint.Y < 7;
         B4 = GetIndexPoint.Y > Height - 7;
 
-        if (B1x && B3)
-        {
-            return 4;
-        }
-        return B1x && B4 ? 7 : B2x && B3 ? 5 : B2x && B4 ? 8 : B1x ? 1 : B2x ? 2 : B3 ? 3 : B4 ? 6 : 0;
+        return B1x && B3 ? 4 : B1x && B4 ? 7 : B2x && B3 ? 5 : B2x && B4 ? 8 : B1x ? 1 : B2x ? 2 : B3 ? 3 : B4 ? 6 : 0;
     }
 
     private int Current;
@@ -292,7 +288,7 @@ public class Ambiance_ThemeContainer : ContainerControl
         }
     }
 
-    private void CorrectBounds(Rectangle bounds)
+    internal void CorrectBounds(Rectangle bounds)
     {
         if (Parent.Width > bounds.Width)
         {
@@ -303,31 +299,9 @@ public class Ambiance_ThemeContainer : ContainerControl
             Parent.Height = bounds.Height;
         }
 
-        var X = Parent.Location.X;
-        var Y = Parent.Location.Y;
-
-        if (X < bounds.X)
-        {
-            X = bounds.X;
-        }
-        if (Y < bounds.Y)
-        {
-            Y = bounds.Y;
-        }
-
-        var Width = bounds.X + bounds.Width;
-        var Height = bounds.Y + bounds.Height;
-
-        if (X + Parent.Width > Width)
-        {
-            X = Width - Parent.Width;
-        }
-        if (Y + Parent.Height > Height)
-        {
-            Y = Height - Parent.Height;
-        }
-
-        Parent.Location = new Point(X, Y);
+        Parent.Location = new Point(
+            Math.Max(bounds.Left, Math.Min(Parent.Left, bounds.Right - Parent.Width)),
+            Math.Max(bounds.Top, Math.Min(Parent.Top, bounds.Bottom - Parent.Height)));
     }
 
     private bool WM_LMBUTTONDOWN;
@@ -356,11 +330,11 @@ public class Ambiance_ThemeContainer : ContainerControl
         }
     }
 
-    private readonly Pen _outerBorderPen = new Pen(Color.FromArgb(30, 28, 25));
-    private readonly SolidBrush _separatorBrush = new SolidBrush(Color.FromArgb(82, 75, 60));
-    private readonly SolidBrush _titleBrush = new SolidBrush(Color.FromArgb(215, 210, 196));
-    private readonly Font _titleFont = new Font("Segoe UI", 9.5f, FontStyle.Regular);
-    private readonly StringFormat _titleFormat = new StringFormat
+    private readonly Pen _outerBorderPen = new(Color.FromArgb(30, 28, 25));
+    private readonly SolidBrush _separatorBrush = new(Color.FromArgb(82, 75, 60));
+    private readonly SolidBrush _titleBrush = new(Color.FromArgb(215, 210, 196));
+    private readonly Font _titleFont = new("Segoe UI", 9.5f, FontStyle.Regular);
+    private readonly StringFormat _titleFormat = new()
     {
         Alignment = StringAlignment.Near,
         LineAlignment = StringAlignment.Center,
@@ -378,7 +352,7 @@ public class Ambiance_ThemeContainer : ContainerControl
     private Color _bodyStart = Color.FromArgb(18, 18, 18);
     private Color _bodyEnd = Color.FromArgb(8, 8, 8);
 
-    /// <summary>Right edge available to the title after header controls are laid out.</summary>
+    // header buttons eat into the title area, so the title stops at this x
     public int TitleRightInset { get; set; }
 
     internal void ApplyTheme(VisualTheme theme)
@@ -395,6 +369,14 @@ public class Ambiance_ThemeContainer : ContainerControl
         _headerBrush = null;
         _bodyGradientBrush?.Dispose();
         _bodyGradientBrush = null;
+        foreach (Control control in Controls)
+        {
+            if (control is Ambiance_ControlBox controlBox)
+            {
+                controlBox.ApplyTheme(theme);
+            }
+        }
+
         Invalidate();
     }
 
@@ -464,7 +446,7 @@ public class Ambiance_ThemeContainer : ContainerControl
 
         G.FillRectangle(_separatorBrush, 1, 37, Width - 2, 1);
 
-        if (_RoundCorners)
+        if (RoundCorners)
         {
             G.FillRectangle(Brushes.Fuchsia, 0, 0, 4, 1);
             G.FillRectangle(Brushes.Fuchsia, 0, 1, 1, 3);
@@ -494,7 +476,9 @@ public class Ambiance_ThemeContainer : ContainerControl
         var titleRight = TitleRightInset > 0 ? Math.Min(TitleRightInset, Width - 12) : Width - 12;
         var titleBounds = new Rectangle(16, 4, Math.Max(0, titleRight - 16), 28);
         if (titleBounds.Width > 0 && !string.IsNullOrEmpty(Text))
+        {
             G.DrawString(Text, _titleFont, _titleBrush, titleBounds, _titleFormat);
+        }
     }
 }
 
@@ -510,111 +494,124 @@ public class Ambiance_ControlBox : Control
         Down = 2
     }
 
-    private MouseState State = MouseState.None;
-    private int X;
-    private readonly Rectangle CloseBtn = new Rectangle(3, 2, 17, 17);
-    private readonly Rectangle MinBtn = new Rectangle(23, 2, 17, 17);
-    private readonly Rectangle MaxBtn = new Rectangle(43, 2, 17, 17);
+    private readonly Button _closeButton;
+    private readonly Button _minimizeButton;
+    private readonly Button _maximizeButton;
+    private readonly ToolTip _toolTip = new();
+    private VisualTheme _theme;
 
-    private readonly Pen _ellipsePen = new Pen(Color.FromArgb(57, 56, 53));
-    private readonly Font _marlett = new Font("Marlett", 7f);
-    private readonly SolidBrush _symbolBrush = new SolidBrush(Color.FromArgb(52, 50, 46));
-    private readonly LinearGradientBrush _closeNorm  = new LinearGradientBrush(new Rectangle(3, 2, 17, 17), Color.FromArgb(242, 132, 99), Color.FromArgb(224, 82, 33), 90f);
-    private readonly LinearGradientBrush _closeHover = new LinearGradientBrush(new Rectangle(3, 2, 17, 17), Color.FromArgb(255, 165, 135), Color.FromArgb(240, 105, 58), 90f);
-    private readonly LinearGradientBrush _closeDown  = new LinearGradientBrush(new Rectangle(3, 2, 17, 17), Color.FromArgb(185, 68, 38), Color.FromArgb(162, 45, 18), 90f);
-    private readonly LinearGradientBrush _grayNorm   = new LinearGradientBrush(new Rectangle(3, 2, 17, 17), Color.FromArgb(130, 129, 123), Color.FromArgb(103, 102, 96), 90f);
-    private readonly LinearGradientBrush _grayHover  = new LinearGradientBrush(new Rectangle(3, 2, 17, 17), Color.FromArgb(196, 196, 196), Color.FromArgb(173, 173, 173), 90f);
-    private readonly LinearGradientBrush _grayDown   = new LinearGradientBrush(new Rectangle(3, 2, 17, 17), Color.FromArgb(88, 88, 88), Color.FromArgb(68, 68, 68), 90f);
-
-    protected override void OnMouseDown(System.Windows.Forms.MouseEventArgs e)
-    {
-        base.OnMouseDown(e);
-
-        State = MouseState.Down;
-        Invalidate();
-    }
-    protected override void OnMouseUp(System.Windows.Forms.MouseEventArgs e)
-    {
-        base.OnMouseUp(e);
-        if (X > 3 && X < 20)
-        {
-            FindForm().Close();
-        }
-        else if (X > 23 && X < 40)
-        {
-            FindForm().WindowState = FormWindowState.Minimized;
-        }
-        else if (X > 43 && X < 60)
-        {
-            if (_EnableMaximize == true)
-            {
-                if (FindForm().WindowState == FormWindowState.Maximized)
-                {
-                    FindForm().WindowState = FormWindowState.Minimized;
-                    FindForm().WindowState = FormWindowState.Normal;
-                }
-                else
-                {
-                    FindForm().WindowState = FormWindowState.Minimized;
-                    FindForm().WindowState = FormWindowState.Maximized;
-                }
-            }
-        }
-        State = MouseState.Over;
-        Invalidate();
-    }
-    protected override void OnMouseEnter(System.EventArgs e)
-    {
-        base.OnMouseEnter(e);
-        State = MouseState.Over;
-        Invalidate();
-    }
-    protected override void OnMouseLeave(System.EventArgs e)
-    {
-        base.OnMouseLeave(e);
-        State = MouseState.None;
-        Invalidate();
-    }
-    protected override void OnMouseMove(System.Windows.Forms.MouseEventArgs e)
-    {
-        base.OnMouseMove(e);
-        X = e.Location.X;
-        Invalidate();
-    }
-    private bool _EnableMaximize = true;
     public bool EnableMaximize
     {
-        get => _EnableMaximize;
+        get;
         set
         {
-            _EnableMaximize = value;
-            Size = _EnableMaximize ? new Size(64, 22) : new Size(44, 22);
+            field = value;
+            _maximizeButton?.Visible = value;
+            Size = field ? new Size(64, 22) : new Size(44, 22);
             Invalidate();
         }
-    }
+    } = true;
 
     public Ambiance_ControlBox()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.SupportsTransparentBackColor | ControlStyles.ResizeRedraw | ControlStyles.DoubleBuffer, true);
         DoubleBuffered = true;
         BackColor = Color.Transparent;
-        Font = new Font("Marlett", 7);
+        TabStop = false;
+        AccessibleName = "Window controls";
         Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _closeButton = CreateWindowButton("closeButton", "Close", 0, 2);
+        _minimizeButton = CreateWindowButton("minimizeButton", "Minimize", 22, 0);
+        _maximizeButton = CreateWindowButton("maximizeButton", "Maximize or restore", 44, 1);
+        _closeButton.Click += (sender, args) => FindForm()?.Close();
+        _minimizeButton.Click += (sender, args) =>
+        {
+            var form = FindForm();
+            form?.WindowState = FormWindowState.Minimized;
+        };
+        _maximizeButton.Click += (sender, args) =>
+        {
+            var form = FindForm();
+            if (form != null && EnableMaximize)
+            {
+                form.WindowState = form.WindowState == FormWindowState.Maximized
+                    ? FormWindowState.Normal : FormWindowState.Maximized;
+            }
+        };
+        Controls.AddRange(new Control[] { _minimizeButton, _maximizeButton, _closeButton });
+        ApplyTheme(BarColorThemes.ClassicSmooth.Ui);
+        Size = new Size(64, 22);
+    }
+
+    private Button CreateWindowButton(string name, string accessibleName, int left, int tabIndex)
+    {
+        var button = new Button
+        {
+            Name = name,
+            AccessibleName = accessibleName,
+            AccessibleRole = AccessibleRole.PushButton,
+            Location = new Point(left, 0),
+            Size = new Size(20, 22),
+            TabIndex = tabIndex,
+            TabStop = true,
+            FlatStyle = FlatStyle.Flat,
+            UseVisualStyleBackColor = false
+        };
+        button.FlatAppearance.BorderSize = 1;
+        button.Paint += PaintWindowButton;
+        button.GotFocus += (sender, args) => button.Invalidate();
+        button.LostFocus += (sender, args) => button.Invalidate();
+        _toolTip.SetToolTip(button, accessibleName);
+        return button;
+    }
+
+    internal void ApplyTheme(VisualTheme theme)
+    {
+        _theme = theme;
+        foreach (Button button in Controls)
+        {
+            button.BackColor = theme.ControlSurface;
+            button.ForeColor = theme.PrimaryText;
+            button.FlatAppearance.BorderColor = theme.Divider;
+            button.FlatAppearance.MouseOverBackColor = theme.Hover;
+            button.FlatAppearance.MouseDownBackColor = theme.Selection;
+            button.Invalidate();
+        }
+    }
+
+    private void PaintWindowButton(object sender, PaintEventArgs e)
+    {
+        var button = (Button)sender;
+        var centerX = button.ClientSize.Width / 2;
+        var centerY = button.ClientSize.Height / 2;
+        var radius = Math.Max(3, Math.Min(button.Width, button.Height) / 5);
+        using var pen = new Pen(button.ForeColor, Math.Max(1f, e.Graphics.DpiX / 96f));
+        if (button == _closeButton)
+        {
+            e.Graphics.DrawLine(pen, centerX - radius, centerY - radius, centerX + radius, centerY + radius);
+            e.Graphics.DrawLine(pen, centerX - radius, centerY + radius, centerX + radius, centerY - radius);
+        }
+        else if (button == _minimizeButton)
+        {
+            e.Graphics.DrawLine(pen, centerX - radius, centerY + (radius / 2), centerX + radius, centerY + (radius / 2));
+        }
+        else
+        {
+            e.Graphics.DrawRectangle(pen, centerX - radius, centerY - radius, radius * 2, radius * 2);
+        }
+
+        if (button.Focused)
+        {
+            using var focusPen = new Pen(_theme.Focus) { DashStyle = DashStyle.Dot };
+            e.Graphics.DrawRectangle(focusPen, 2, 2, Math.Max(1, button.Width - 5), Math.Max(1, button.Height - 5));
+        }
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            _ellipsePen.Dispose();
-            _marlett.Dispose();
-            _symbolBrush.Dispose();
-            _closeNorm.Dispose();
-            _closeHover.Dispose();
-            _closeDown.Dispose();
-            _grayNorm.Dispose();
-            _grayHover.Dispose();
-            _grayDown.Dispose();
+            _toolTip.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -622,7 +619,7 @@ public class Ambiance_ControlBox : Control
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
-        Size = _EnableMaximize ? new Size(64, 22) : new Size(44, 22);
+        Size = EnableMaximize ? new Size(64, 22) : new Size(44, 22);
     }
 
     protected override void OnCreateControl()
@@ -631,37 +628,6 @@ public class Ambiance_ControlBox : Control
         Location = Parent == null
             ? new Point(5, 8)
             : new Point(Math.Max(5, Parent.ClientSize.Width - Width - 8), 8);
-    }
-
-    protected override void OnPaint(System.Windows.Forms.PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        var G = e.Graphics;
-        G.SmoothingMode = SmoothingMode.AntiAlias;
-
-        var isClose = X > 3 && X < 20;
-        var isMin   = X > 23 && X < 40;
-        var isMax   = X > 43 && X < 60;
-        var isDown  = State == MouseState.Down;
-        var isOver  = State != MouseState.None;
-
-        var closeBrush = isDown && isClose ? _closeDown : isOver && isClose ? _closeHover : _closeNorm;
-        G.FillEllipse(closeBrush, CloseBtn);
-        G.DrawEllipse(_ellipsePen, CloseBtn);
-        G.DrawString("r", _marlett, _symbolBrush, new Rectangle(6, 8, 0, 0));
-
-        var minBrush = isDown && isMin ? _grayDown : isOver && isMin ? _grayHover : _grayNorm;
-        G.FillEllipse(minBrush, MinBtn);
-        G.DrawEllipse(_ellipsePen, MinBtn);
-        G.DrawString("0", _marlett, _symbolBrush, new Rectangle(26, 4, 0, 0));
-
-        if (_EnableMaximize)
-        {
-            var maxBrush = isDown && isMax ? _grayDown : isOver && isMax ? _grayHover : _grayNorm;
-            G.FillEllipse(maxBrush, MaxBtn);
-            G.DrawEllipse(_ellipsePen, MaxBtn);
-            G.DrawString("1", _marlett, _symbolBrush, new Rectangle(46, 7, 0, 0));
-        }
     }
 }
 
@@ -700,10 +666,8 @@ public class Ambiance_ProgressBar : Control
     #endregion Enums
     #region Variables
 
-    private int _Minimum;
     private int _Maximum = 100;
     private int _Value = 0;
-    private Alignment ALN;
     private bool _DrawHatch;
 
     private bool _ShowPercentage;
@@ -741,10 +705,10 @@ public class Ambiance_ProgressBar : Control
 
     public int Minimum
     {
-        get => _Minimum;
+        get;
         set
         {
-            _Minimum = value;
+            field = value;
 
             if (value > _Maximum)
             {
@@ -777,10 +741,10 @@ public class Ambiance_ProgressBar : Control
 
     public Alignment ValueAlignment
     {
-        get => ALN;
+        get;
         set
         {
-            ALN = value;
+            field = value;
             Invalidate();
         }
     }
@@ -860,7 +824,7 @@ public class Ambiance_ProgressBar : Control
         G.SetClip(GP1);
         G.FillPath(new SolidBrush(Color.FromArgb(244, 241, 243)), RoundRectangle.RoundRect(new Rectangle(1, 1, Width - 3, (Height / 2) - 2), 4));
 
-        I1 = (int)Math.Round((this._Value - this._Minimum) / (double)(this._Maximum - this._Minimum) * (this.Width - 3));
+        I1 = (int)Math.Round((this._Value - Minimum) / (double)(this._Maximum - Minimum) * (this.Width - 3));
         if (I1 > 1)
         {
             GP3 = RoundRectangle.RoundRect(new Rectangle(1, 1, I1, Height - 3), 4);
@@ -939,20 +903,18 @@ public class Ambiance_Toggle : Control
         add => ToggledChangedEvent = (ToggledChangedEventHandler)System.Delegate.Combine(ToggledChangedEvent, value); remove => ToggledChangedEvent = (ToggledChangedEventHandler)System.Delegate.Remove(ToggledChangedEvent, value);
     }
 
-    private bool _Toggled;
-    private _Type ToggleType;
     private Rectangle Bar;
-    private Size cHandle = new Size(15, 20);
+    private Size cHandle = new(15, 20);
 
     #endregion Variables
     #region Properties
 
     public bool Toggled
     {
-        get => _Toggled;
+        get;
         set
         {
-            _Toggled = value;
+            field = value;
             Invalidate();
             ToggledChangedEvent?.Invoke();
         }
@@ -960,10 +922,10 @@ public class Ambiance_Toggle : Control
 
     public _Type Type
     {
-        get => ToggleType;
+        get;
         set
         {
-            ToggleType = value;
+            field = value;
             Invalidate();
         }
     }
@@ -1003,7 +965,7 @@ public class Ambiance_Toggle : Control
         int SwitchXLoc;
 
         LinearGradientBrush BackgroundLGB;
-        if (_Toggled)
+        if (Toggled)
         {
             SwitchXLoc = 37;
             BackgroundLGB = new LinearGradientBrush(ControlRectangle, Color.FromArgb(231, 108, 58), Color.FromArgb(236, 113, 63), 90.0F);
@@ -1016,7 +978,7 @@ public class Ambiance_Toggle : Control
 
         G.FillPath(BackgroundLGB, ControlPath);
 
-        switch (ToggleType)
+        switch (Type)
         {
             case _Type.OnOff:
                 if (Toggled)
@@ -1056,7 +1018,7 @@ public class Ambiance_Toggle : Control
 
         G.FillPath(SwitchButtonLGB, SwitchPath);
 
-        if (_Toggled == true)
+        if (Toggled == true)
         {
             G.DrawPath(new Pen(Color.FromArgb(185, 89, 55)), SwitchPath);
             G.DrawPath(new Pen(Color.FromArgb(185, 89, 55)), ControlPath);
@@ -1076,18 +1038,15 @@ public class Ambiance_ComboBox : ComboBox
 {
     #region Variables
 
-    private int _StartIndex = 0;
-    private Color _HoverSelectionColor;
-
     #endregion Variables
     #region Custom Properties
 
     public int StartIndex
     {
-        get => _StartIndex;
+        get;
         set
         {
-            _StartIndex = value;
+            field = value;
             try
             {
                 base.SelectedIndex = value;
@@ -1097,14 +1056,14 @@ public class Ambiance_ComboBox : ComboBox
             }
             Invalidate();
         }
-    }
+    } = 0;
 
     public Color HoverSelectionColor
     {
-        get => _HoverSelectionColor;
+        get;
         set
         {
-            _HoverSelectionColor = value;
+            field = value;
             Invalidate();
         }
     }
@@ -1223,9 +1182,7 @@ public class Ambiance_NumericUpDown : Control
     private long _Maximum;
     private int Xval;
     private bool KeyboardNum;
-    private _TextAlignment MyStringAlignment;
-
-    private readonly Timer LongPressTimer = new Timer();
+    private readonly Timer LongPressTimer = new();
 
     #endregion Variables
     #region Properties
@@ -1279,10 +1236,10 @@ public class Ambiance_NumericUpDown : Control
 
     public _TextAlignment TextAlignment
     {
-        get => MyStringAlignment;
+        get;
         set
         {
-            MyStringAlignment = value;
+            field = value;
             Invalidate();
         }
     }
@@ -1463,7 +1420,7 @@ public class Ambiance_NumericUpDown : Control
         G.DrawString("-", new Font("Tahoma", 14), new SolidBrush(Color.FromArgb(75, 75, 75)), new Rectangle(Width - 44, 1, 19, 30));
         G.DrawLine(new Pen(Color.FromArgb(229, 228, 227)), Width - 48, 1, Width - 48, this.Height - 2);
 
-        switch (MyStringAlignment)
+        switch (TextAlignment)
         {
             case _TextAlignment.Near:
                 G.DrawString(System.Convert.ToString(Value), Font, new SolidBrush(ForeColor), new Rectangle(5, 0, Width - 1, Height - 1), new StringFormat() { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center });
@@ -1503,57 +1460,50 @@ public class Ambiance_TrackBar : Control
     private bool Cap;
     private int ValueDrawer;
 
-    private Size ThumbSize = new Size(15, 15);
+    private Size ThumbSize = new(15, 15);
     private Rectangle TrackThumb;
-
-    private int _Minimum = 0;
-    private int _Maximum = 10;
     private int _Value = 0;
-
-    private bool _DrawValueString = false;
-    private bool _JumpToMouse = false;
-    private ValueDivisor DividedValue = ValueDivisor.By1;
 
     #endregion Variables
     #region Properties
 
     public int Minimum
     {
-        get => _Minimum;
+        get;
         set
         {
-            if (value >= _Maximum)
+            if (value >= Maximum)
             {
-                value = _Maximum - 10;
+                value = Maximum - 10;
             }
             if (_Value < value)
             {
                 _Value = value;
             }
 
-            _Minimum = value;
+            field = value;
             Invalidate();
         }
-    }
+    } = 0;
 
     public int Maximum
     {
-        get => _Maximum;
+        get;
         set
         {
-            if (value <= _Minimum)
+            if (value <= Minimum)
             {
-                value = _Minimum + 10;
+                value = Minimum + 10;
             }
             if (_Value > value)
             {
                 _Value = value;
             }
 
-            _Maximum = value;
+            field = value;
             Invalidate();
         }
-    }
+    } = 10;
 
     public delegate void ValueChangedEventHandler();
     private ValueChangedEventHandler ValueChangedEvent;
@@ -1570,7 +1520,7 @@ public class Ambiance_TrackBar : Control
         {
             if (_Value != value)
             {
-                _Value = value < _Minimum ? _Minimum : value > _Maximum ? _Maximum : value;
+                _Value = value < Minimum ? Minimum : value > Maximum ? Maximum : value;
                 Invalidate();
                 ValueChangedEvent?.Invoke();
             }
@@ -1579,40 +1529,40 @@ public class Ambiance_TrackBar : Control
 
     public ValueDivisor ValueDivison
     {
-        get => DividedValue;
+        get;
         set
         {
-            DividedValue = value;
+            field = value;
             Invalidate();
         }
-    }
+    } = ValueDivisor.By1;
 
     [Browsable(false)]
     public float ValueToSet
     {
-        get => _Value / (int)DividedValue; set => Value = (int)(value * (int)DividedValue);
+        get => _Value / (int)ValueDivison; set => Value = (int)(value * (int)ValueDivison);
     }
 
     public bool JumpToMouse
     {
-        get => _JumpToMouse;
+        get;
         set
         {
-            _JumpToMouse = value;
+            field = value;
             Invalidate();
         }
-    }
+    } = false;
 
     public bool DrawValueString
     {
-        get => _DrawValueString;
+        get;
         set
         {
-            _DrawValueString = value;
-            Height = _DrawValueString == true ? 35 : 22;
+            field = value;
+            Height = field == true ? 35 : 22;
             Invalidate();
         }
-    }
+    } = false;
 
     #endregion Properties
     #region EventArgs
@@ -1625,7 +1575,7 @@ public class Ambiance_TrackBar : Control
             var flag = this.Cap && e.X > -1 && e.X < this.Width + 1;
             if (flag)
             {
-                this.Value = this._Minimum + (int)Math.Round((this._Maximum - this._Minimum) * (e.X / (double)this.Width));
+                this.Value = Minimum + (int)Math.Round((Maximum - Minimum) * (e.X / (double)this.Width));
             }
         }
     }
@@ -1638,14 +1588,14 @@ public class Ambiance_TrackBar : Control
         {
             if (flag)
             {
-                this.ValueDrawer = (int)Math.Round((this._Value - this._Minimum) / (double)(this._Maximum - this._Minimum) * (this.Width - 11));
+                this.ValueDrawer = (int)Math.Round((this._Value - Minimum) / (double)(Maximum - Minimum) * (this.Width - 11));
                 this.TrackBarHandleRect = new Rectangle(this.ValueDrawer, 0, 25, 25);
                 this.Cap = this.TrackBarHandleRect.Contains(e.Location);
                 _ = this.Focus();
-                flag = this._JumpToMouse;
+                flag = JumpToMouse;
                 if (flag)
                 {
-                    this.Value = this._Minimum + (int)Math.Round((this._Maximum - this._Minimum) * (e.X / (double)this.Width));
+                    this.Value = Minimum + (int)Math.Round((Maximum - Minimum) * (e.X / (double)this.Width));
                 }
             }
         }
@@ -1670,7 +1620,7 @@ public class Ambiance_TrackBar : Control
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
-        Height = _DrawValueString == true ? 35 : 22;
+        Height = DrawValueString == true ? 35 : 22;
     }
 
     protected override void OnPaint(System.Windows.Forms.PaintEventArgs e)
@@ -1685,7 +1635,7 @@ public class Ambiance_TrackBar : Control
 
         try
         {
-            this.ValueDrawer = (int)Math.Round((this._Value - this._Minimum) / (double)(this._Maximum - this._Minimum) * (this.Width - 11));
+            this.ValueDrawer = (int)Math.Round((this._Value - Minimum) / (double)(Maximum - Minimum) * (this.Width - 11));
         }
         catch (Exception)
         {
@@ -1706,7 +1656,7 @@ public class Ambiance_TrackBar : Control
         G.FillEllipse(new SolidBrush(Color.FromArgb(244, 244, 244)), this.TrackThumb.X + (int)Math.Round(unchecked(TrackThumb.Width * (Value / (double)this.Maximum))) - (int)Math.Round(ThumbSize.Width / 2.0), this.TrackThumb.Y + (int)Math.Round(TrackThumb.Height / 2.0) - (int)Math.Round(ThumbSize.Height / 2.0), this.ThumbSize.Width, this.ThumbSize.Height);
         G.DrawEllipse(new Pen(Color.FromArgb(180, 180, 180)), this.TrackThumb.X + (int)Math.Round(unchecked(TrackThumb.Width * (Value / (double)this.Maximum))) - (int)Math.Round(ThumbSize.Width / 2.0), this.TrackThumb.Y + (int)Math.Round(TrackThumb.Height / 2.0) - (int)Math.Round(ThumbSize.Height / 2.0), this.ThumbSize.Width, this.ThumbSize.Height);
 
-        if (_DrawValueString == true)
+        if (DrawValueString == true)
         {
             G.DrawString(System.Convert.ToString(ValueToSet), Font, Brushes.DimGray, 1, 20);
         }

@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Diagnostics;
 using System.Linq;
@@ -7,7 +8,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
-/// <summary>Independent FFT channel powers must agree with separately measured mono signals.</summary>
+// Left/right channels get their own FFT, and the result must match measuring each mono signal on its own.
 public class IndependentChannelSpectrumTests
 {
     private readonly ITestOutputHelper _output;
@@ -39,7 +40,6 @@ public class IndependentChannelSpectrumTests
 
         AssertPowersClose(AnalyzeMonoChannel(samples, sampleRate, 0), left);
         AssertPowersClose(AnalyzeMonoChannel(samples, sampleRate, 1), right);
-        // The legacy API and expression must continue to produce the identical mixed output.
         Assert.Equal(Signals.AnalyzePower(Signals.DefaultEngine(sampleRate, 2), samples), combined);
         for (var band = 0; band < combined.Length; band++)
             AssertPowerClose((left[band] + right[band]) / 2, combined[band]);

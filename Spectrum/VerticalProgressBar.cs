@@ -1,9 +1,12 @@
-﻿using System;
+﻿// Developer :: > Gehan Fernando
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace Spectrum;
@@ -32,6 +35,17 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private float _peakValue;
     private float _peakHoldLeftMs;
+    private float _visualPeakLevel;
+    private bool _visualPeakValid;
+    private bool _visualPeakReleasing;
+    private readonly int _ownerThreadId = Thread.CurrentThread.ManagedThreadId;
+    private int _timerWakePending;
+    private readonly float[] _trailLevels = new float[8];
+    private readonly float[] _trailLife = new float[8];
+    private int _trailWrite;
+    private float _trailSampleElapsed;
+    private bool _trailActive;
+    private int _lastTrailQ = int.MinValue;
 
     private int _lastDisplayQ = int.MinValue;
     private int _lastPeakQ = int.MinValue;
@@ -46,7 +60,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private int _cachedWidth = -1;
 
-    // Hysteresis keeps the top brick steady near boundaries; bricks switch on and off 2 px from their centers.
+    // hysteresis so the top brick doesn't flicker near a boundary (flips 2 px off center)
     private const int BrickHysteresisPx = 2;
     private int _litBricks;
     private bool _litBricksValid;
@@ -54,6 +68,41 @@ public sealed class VerticalProgressBar : ProgressBar
     private bool _colorsDirty = true;
 
     private SolidBrush _backgroundBrush;
+    private Bitmap _inactiveMeterSurface;
+    private Bitmap _activeMeterSurface;
+    private bool _meterSurfacesDirty = true;
+    private bool _meterSurfacesHighQuality;
+    private VisualizationMode _meterSurfacesMode;
+    private float[] _surfaceGridlines = Array.Empty<float>();
+    private float[] _surfaceVerticalGridlines = Array.Empty<float>();
+    private Rectangle _cachedPlotBounds;
+    private Rectangle _surfacePlotBounds;
+    internal Rectangle RenderedActiveBounds { get; private set; }
+    internal Rectangle RenderedPeakBounds { get; private set; }
+
+    // everything here is device pixels; bitmap DPI metadata must never shift the layout
+    private float RenderDpiY => DeviceDpi;
+    private int MarkerThickness => (int)Math.Min(int.MaxValue / 4,
+        Math.Max(1, Math.Ceiling(Math.Max(1, PeakLineThickness) * (double)RenderDpiY / 96)));
+    internal int PeakGapPixels => Math.Max(1, (int)Math.Ceiling(2f * RenderDpiY / 96f));
+
+    // level extent: zero at Bottom, full scale at Top, peak headroom sits above Top
+    internal Rectangle PlotBounds
+    {
+        get
+        {
+            var bounds = ClientRectangle;
+            var pad = BrickPadding;
+            var width = Math.Max(0, bounds.Width - 2 * pad);
+            var height = Math.Max(0, bounds.Height - 2 * pad);
+            var mode = GetVisualizationModeCached();
+            var reserve = mode is VisualizationMode.Spectrum or VisualizationMode.Bricks or VisualizationMode.Led
+                ? MarkerThickness + PeakGapPixels : 0;
+            // a tiny control keeps its level mapping but hides a marker that can't fit
+            if (height <= reserve) reserve = 0;
+            return new Rectangle(bounds.X + pad, bounds.Y + pad + reserve, width, height - reserve);
+        }
+    }
     private readonly SolidBrush _workBrush = new(Color.Black);
     private readonly SolidBrush _brickShadeBrush = new(Color.FromArgb(48, 0, 0, 0));
     private readonly SolidBrush _glowOuterBrush = new(Color.FromArgb(24, Color.Cyan));
@@ -143,21 +192,68 @@ public sealed class VerticalProgressBar : ProgressBar
                 return;
 
             _style = value;
+            Array.Clear(_trailLife, 0, _trailLife.Length);
+            _trailActive = false;
+            _lastTrailQ = int.MinValue;
             Invalidate();
         }
     }
 
     [Category("Appearance")]
-    public int BrickPadding { get; set; } = 2;
+    public int BrickPadding
+    {
+        get => _brickPadding;
+        set
+        {
+            if (value < 0) throw new ArgumentOutOfRangeException(nameof(value));
+            if (_brickPadding == value) return;
+            _brickPadding = value;
+            InvalidateBrickGeometry();
+        }
+    }
+    private int _brickPadding = 2;
 
     [Category("Appearance")]
-    public int BrickHeight { get; set; } = 6;
+    public int BrickHeight
+    {
+        get => _brickHeight;
+        set
+        {
+            if (value < 1) throw new ArgumentOutOfRangeException(nameof(value));
+            if (_brickHeight == value) return;
+            _brickHeight = value;
+            InvalidateBrickGeometry();
+        }
+    }
+    private int _brickHeight = 6;
 
     [Category("Appearance")]
-    public int BrickGap { get; set; } = 2;
+    public int BrickGap
+    {
+        get => _brickGap;
+        set
+        {
+            if (value < 0) throw new ArgumentOutOfRangeException(nameof(value));
+            if (_brickGap == value) return;
+            _brickGap = value;
+            InvalidateBrickGeometry();
+        }
+    }
+    private int _brickGap = 2;
 
     [Category("Appearance")]
-    public bool BrickHighlight { get; set; } = true;
+    public bool BrickHighlight
+    {
+        get => _brickHighlight;
+        set
+        {
+            if (_brickHighlight == value) return;
+            _brickHighlight = value;
+            BuildBrickHighlightBrush();
+            Invalidate();
+        }
+    }
+    private bool _brickHighlight = true;
 
     private int _highlightAlpha = 55;
 
@@ -174,7 +270,18 @@ public sealed class VerticalProgressBar : ProgressBar
     }
 
     [Category("Appearance")]
-    public bool HighQualityRendering { get; set; } = false;
+    public bool HighQualityRendering
+    {
+        get => _highQualityRendering;
+        set
+        {
+            if (_highQualityRendering == value) return;
+            _highQualityRendering = value;
+            _meterSurfacesDirty = true;
+            Invalidate();
+        }
+    }
+    private bool _highQualityRendering;
 
     private bool _heatmapEnabled = true;
     private Color _heatLowColor = Color.FromArgb(0, 255, 80);
@@ -251,7 +358,17 @@ public sealed class VerticalProgressBar : ProgressBar
     }
 
     [Category("Peak Hold")]
-    public bool PeakHoldEnabled { get; set; } = true;
+    public bool PeakHoldEnabled
+    {
+        get => _peakHoldEnabled;
+        set
+        {
+            _peakHoldEnabled = value;
+            if (!value) _visualPeakValid = _visualPeakReleasing = false;
+            Invalidate();
+        }
+    }
+    private bool _peakHoldEnabled = true;
 
     [Category("Peak Hold")]
     public int PeakHoldMilliseconds { get; set; } = 140;
@@ -260,24 +377,57 @@ public sealed class VerticalProgressBar : ProgressBar
     public float PeakDecayPerTick { get; set; } = 1.2f;
 
     [Category("Peak Hold")]
-    public int PeakLineThickness { get; set; } = 2;
+    public int PeakLineThickness
+    {
+        get => _peakLineThickness;
+        set
+        {
+            if (_peakLineThickness == value) return;
+            _peakLineThickness = value;
+            InvalidateBrickGeometry();
+        }
+    }
+    private int _peakLineThickness = 2;
 
     [Category("Peak Hold")]
-    public Color PeakLineColor { get; set; } = Color.FromArgb(255, 255, 255);
+    public Color PeakLineColor
+    {
+        get => _peakLineColor;
+        set { _peakLineColor = value; Invalidate(); }
+    }
+    private Color _peakLineColor = Color.White;
 
-    // Match the peak marker to the heat-map color at the peak's height.
+    // peak marker takes the heat-map color from the peak's own height
     [Category("Peak Hold")]
-    public bool PeakColorMatchesHeat { get; set; } = true;
+    public bool PeakColorMatchesHeat
+    {
+        get => _peakColorMatchesHeat;
+        set { _peakColorMatchesHeat = value; Invalidate(); }
+    }
+    private bool _peakColorMatchesHeat = true;
 
-    // Shared normalized reference ticks align across bars and show through only above the fill.
+    // shared reference ticks line up across bars and only show through above the fill
     [Category("Appearance")]
-    public IReadOnlyList<float> GridlineLevels { get; set; }
+    public IReadOnlyList<float> GridlineLevels
+    {
+        get => _gridlineLevels;
+        set { _gridlineLevels = value; _meterSurfacesDirty = true; Invalidate(); }
+    }
+    private IReadOnlyList<float> _gridlineLevels;
+
+    // grid x positions are local device pixels, not band indices
+    internal IReadOnlyList<float> VerticalGridlinePositions
+    {
+        get => _verticalGridlinePositions;
+        set { _verticalGridlinePositions = value; _meterSurfacesDirty = true; Invalidate(); }
+    }
+    private IReadOnlyList<float> _verticalGridlinePositions;
 
     [Category("Appearance")]
     public Color GridlineColor
     {
         get => _gridlinePen.Color;
-        set { _gridlinePen.Color = value; Invalidate(); }
+        set { _gridlinePen.Color = value; _meterSurfacesDirty = true; Invalidate(); }
     }
 
     private int _animationFps = 60;
@@ -347,6 +497,7 @@ public sealed class VerticalProgressBar : ProgressBar
         _innerEdgePen.Color = Color.FromArgb(80, theme.Divider);
         _highlightPen.Color = Color.FromArgb(122, theme.PrimaryText);
         _gridlinePen.Color = Color.FromArgb(94, theme.Grid);
+        _meterSurfacesDirty = true;
         Invalidate();
     }
 
@@ -357,6 +508,8 @@ public sealed class VerticalProgressBar : ProgressBar
             UnregisterInstance();
 
             _backgroundBrush?.Dispose();
+            _inactiveMeterSurface?.Dispose();
+            _activeMeterSurface?.Dispose();
             _brickHighlightBrush?.Dispose();
             _borderPen?.Dispose();
             _innerEdgePen?.Dispose();
@@ -379,6 +532,7 @@ public sealed class VerticalProgressBar : ProgressBar
         base.OnBackColorChanged(e);
         _backgroundBrush?.Dispose();
         _backgroundBrush = new SolidBrush(BackColor);
+        _meterSurfacesDirty = true;
         Invalidate();
     }
 
@@ -428,7 +582,58 @@ public sealed class VerticalProgressBar : ProgressBar
     {
         if (IsDisposed) return;
         _targetValue = Clamp(value, Minimum, Maximum);
+        if (Thread.CurrentThread.ManagedThreadId == _ownerThreadId)
+        {
+            EnsureTimerConfigured();
+            return;
+        }
+        // no handle yet, so the timer or OnHandleCreated will pick the target up later
+        if (!IsHandleCreated || Interlocked.Exchange(ref _timerWakePending, 1) != 0) return;
+        try
+        {
+            BeginInvoke((Action)(() =>
+            {
+                Interlocked.Exchange(ref _timerWakePending, 0);
+                if (!IsDisposed && !Disposing) EnsureTimerConfigured();
+            }));
+        }
+        catch (InvalidOperationException) when (!IsHandleCreated || IsDisposed || Disposing)
+        {
+            Interlocked.Exchange(ref _timerWakePending, 0);
+        }
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Interlocked.Exchange(ref _timerWakePending, 0);
         EnsureTimerConfigured();
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        Array.Clear(_trailLife, 0, _trailLife.Length);
+        _trailActive = false;
+        _visualPeakValid = _visualPeakReleasing = false;
+        if (Visible)
+        {
+            _displayValue = _targetValue;
+            _peakValue = _displayValue;
+            _peakHoldLeftMs = 0;
+            _lastDisplayQ = _lastPeakQ = _lastTrailQ = int.MinValue;
+            EnsureTimerConfigured();
+            Invalidate();
+            return;
+        }
+        lock (s_lock)
+        {
+            foreach (var reference in s_instances)
+                if (reference.TryGetTarget(out var control) && !control.IsDisposed && control.Visible) return;
+            s_timer?.Stop();
+            s_lastTicks = 0;
+            s_idleTicks = 0;
+        }
     }
 
     protected override void OnPaintBackground(PaintEventArgs pevent) { }
@@ -439,23 +644,21 @@ public sealed class VerticalProgressBar : ProgressBar
         if (bounds.Width <= 0 || bounds.Height <= 0) return;
 
         ConfigureGraphicsQuality(e.Graphics);
+        RenderedActiveBounds = Rectangle.Empty;
+        RenderedPeakBounds = Rectangle.Empty;
+        var plot = PlotBounds;
+        var innerX = plot.X;
+        var innerW = plot.Width;
+        var topInner = plot.Top;
+        var bottomInner = plot.Bottom;
 
-        e.Graphics.FillRectangle(_backgroundBrush, bounds);
-        e.Graphics.DrawRectangle(_borderPen, bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1);
-        if (bounds.Width > 3 && bounds.Height > 3)
-            e.Graphics.DrawRectangle(_innerEdgePen, bounds.X + 1, bounds.Y + 1, bounds.Width - 3, bounds.Height - 3);
-
-        var padding = BrickPadding;
-        var innerX = bounds.X + padding;
-        var innerW = bounds.Width - (padding * 2);
-        var topInner = bounds.Top + padding;
-        var bottomInner = bounds.Bottom - padding;
-
-        if (innerW <= 0 || bottomInner <= topInner) return;
+        if (innerW <= 0 || bottomInner <= topInner)
+        {
+            DrawMeterBackground(e.Graphics, bounds);
+            return;
+        }
 
         var innerH = Math.Max(1, bottomInner - topInner);
-
-        DrawGridlines(e.Graphics, innerX, innerW, topInner, bottomInner, innerH);
 
         float range = Math.Max(1, Maximum - Minimum);
         var fillPercent = Clamp01((_displayValue - Minimum) / range);
@@ -466,8 +669,17 @@ public sealed class VerticalProgressBar : ProgressBar
         if (mode != VisualizationMode.Spectrum)
             UpdateLitBricks(bounds, bottomInner, innerH, filledH);
 
-        switch (mode)
+        var activeTop = GetActiveTop(mode, plot, filledH);
+        var cached = (mode == VisualizationMode.Spectrum || mode == VisualizationMode.Bricks ||
+            mode == VisualizationMode.Led) && DrawCachedMeter(e.Graphics, bounds, mode);
+        GraphicsState levelClip;
+        if (!cached)
         {
+            DrawMeterBackground(e.Graphics, bounds);
+            levelClip = e.Graphics.Save();
+            e.Graphics.SetClip(plot, CombineMode.Intersect);
+            switch (mode)
+            {
             case VisualizationMode.Bricks:
                 DrawMode_Bricks(e.Graphics, bounds);
                 break;
@@ -492,8 +704,15 @@ public sealed class VerticalProgressBar : ProgressBar
             default:
                 DrawMode_Spectrum(e.Graphics, bounds);
                 break;
+            }
+            e.Graphics.Restore(levelClip);
         }
 
+        // cached bodies already respect the plot clip, so the usual 83-band path skips
+            // saving graphics state unless an effect or antialiased edge needs containment.
+        var clipEffects = VisualStyle is not VisualStyle.None and not VisualStyle.Pulse || HighQualityRendering;
+        levelClip = clipEffects ? e.Graphics.Save() : null;
+        if (clipEffects) e.Graphics.SetClip(plot, CombineMode.Intersect);
         if (VisualStyle == VisualStyle.Glow)
             DrawStyleGlow(e.Graphics, innerX, innerW, topInner, bottomInner, filledH, fillPercent);
         else if (VisualStyle == VisualStyle.Trail)
@@ -505,14 +724,23 @@ public sealed class VerticalProgressBar : ProgressBar
 
         var topEdge = mode == VisualizationMode.Center || mode == VisualizationMode.Mirror
             ? topInner + (innerH / 2)
-            : bottomInner - filledH;
+            : activeTop;
         if (mode != VisualizationMode.Led && mode != VisualizationMode.Dots && mode != VisualizationMode.Lollipop &&
             filledH > 1 && topEdge >= topInner && topEdge <= bottomInner)
+        {
             e.Graphics.DrawLine(_highlightPen, innerX, topEdge, innerX + innerW - 1, topEdge);
+            if (HighQualityRendering)
+                activeTop = Math.Max(topInner, Math.Min(activeTop, topEdge - 1));
+        }
+        activeTop = GetPaintedActiveTop(mode, plot, filledH, fillPercent, range);
+        if (activeTop < bottomInner)
+            RenderedActiveBounds = Rectangle.FromLTRB(innerX, activeTop, innerX + innerW, bottomInner);
+        if (clipEffects) e.Graphics.Restore(levelClip);
 
-        // Draw peaks last so styles and active-edge highlights cannot conceal them.
-        // Hide the peak marker at the floor to avoid a row of markers during silence.
-        if (PeakHoldEnabled && ModeHasPeakMarker(mode) && _peakValue > Minimum + 0.5f)
+        // peaks go last so styles and edge highlights can't hide them
+        // at the floor the marker is hidden, otherwise silence shows a row of markers
+        if (PeakHoldEnabled && ModeHasPeakMarker(mode) &&
+            (_peakValue > Minimum + 0.5f || _visualPeakValid && _visualPeakLevel > Minimum + 0.5f))
         {
             var peakPercent = Clamp01((Clamp(_peakValue, Minimum, Maximum) - Minimum) / range);
             _peakBrush.Color = GetPeakColor(peakPercent);
@@ -527,13 +755,116 @@ public sealed class VerticalProgressBar : ProgressBar
         }
     }
 
+    private void DrawMeterBackground(Graphics graphics, Rectangle bounds)
+    {
+        graphics.FillRectangle(_backgroundBrush, bounds);
+        graphics.DrawRectangle(_borderPen, bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1);
+        if (bounds.Width > 3 && bounds.Height > 3)
+            graphics.DrawRectangle(_innerEdgePen, bounds.X + 1, bounds.Y + 1, bounds.Width - 3, bounds.Height - 3);
+        var plot = PlotBounds;
+        if (plot.Width > 0 && plot.Height > 0)
+            DrawGridlines(graphics, plot.X, plot.Width, plot.Top, plot.Bottom, plot.Height);
+    }
+
+    private bool DrawCachedMeter(Graphics graphics, Rectangle bounds, VisualizationMode mode)
+    {
+        // cap optional cache memory even if someone sizes the control absurdly
+        if ((long)bounds.Width * bounds.Height > 1024 * 1024) return false;
+        var plot = PlotBounds;
+        if (_surfacePlotBounds != plot)
+        {
+            _surfacePlotBounds = plot;
+            _meterSurfacesDirty = true;
+        }
+        if (mode != VisualizationMode.Spectrum)
+        {
+            EnsureBrickGeometry(bounds);
+            if (_colorsDirty)
+            {
+                RebuildBrickHeatColors();
+                _meterSurfacesDirty = true;
+            }
+        }
+        var levels = GridlineLevels;
+        var count = levels?.Count ?? 0;
+        if (_surfaceGridlines.Length != count)
+        {
+            _surfaceGridlines = new float[count];
+            _meterSurfacesDirty = true;
+        }
+        for (var index = 0; index < count; index++)
+        {
+            if (_surfaceGridlines[index].Equals(levels[index])) continue;
+            _surfaceGridlines[index] = levels[index];
+            _meterSurfacesDirty = true;
+        }
+        var verticals = VerticalGridlinePositions;
+        count = verticals?.Count ?? 0;
+        if (_surfaceVerticalGridlines.Length != count)
+        {
+            _surfaceVerticalGridlines = new float[count];
+            _meterSurfacesDirty = true;
+        }
+        for (var index = 0; index < count; index++)
+        {
+            if (_surfaceVerticalGridlines[index].Equals(verticals[index])) continue;
+            _surfaceVerticalGridlines[index] = verticals[index];
+            _meterSurfacesDirty = true;
+        }
+        if (_inactiveMeterSurface == null || _inactiveMeterSurface.Size != bounds.Size ||
+            _meterSurfacesMode != mode || _meterSurfacesHighQuality != HighQualityRendering ||
+            _meterSurfacesDirty)
+        {
+            _inactiveMeterSurface?.Dispose();
+            _activeMeterSurface?.Dispose();
+            _activeMeterSurface = null;
+            _inactiveMeterSurface = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppPArgb);
+            var lit = _litBricks;
+            try
+            {
+                PaintMeterSurface(_inactiveMeterSurface, bounds, mode, 0);
+                if (mode != VisualizationMode.Spectrum)
+                {
+                    _activeMeterSurface = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppPArgb);
+                    PaintMeterSurface(_activeMeterSurface, bounds, mode, _brickRects.Count);
+                }
+            }
+            finally { _litBricks = lit; }
+            _meterSurfacesMode = mode;
+            _meterSurfacesHighQuality = HighQualityRendering;
+            _meterSurfacesDirty = false;
+        }
+        graphics.DrawImageUnscaled(_inactiveMeterSurface, 0, 0);
+        if (mode == VisualizationMode.Spectrum)
+            DrawMode_Spectrum(graphics, bounds);
+        else if (_litBricks > 0)
+        {
+            var top = Math.Max(plot.Top, _brickRects[Math.Min(_litBricks, _brickRects.Count) - 1].Top -
+                (mode == VisualizationMode.Led && HighQualityRendering ? 1 : 0));
+            var activeBounds = new Rectangle(0, top, bounds.Width, bounds.Height - top);
+            graphics.DrawImage(_activeMeterSurface, activeBounds, activeBounds, GraphicsUnit.Pixel);
+        }
+        return true;
+    }
+
+    private void PaintMeterSurface(Bitmap surface, Rectangle bounds, VisualizationMode mode, int lit)
+    {
+        using var graphics = Graphics.FromImage(surface);
+        ConfigureGraphicsQuality(graphics);
+        DrawMeterBackground(graphics, bounds);
+        graphics.SetClip(PlotBounds, CombineMode.Intersect);
+        _litBricks = lit;
+        if (mode == VisualizationMode.Bricks) DrawMode_Bricks(graphics, bounds);
+        else if (mode == VisualizationMode.Led) DrawMode_Led(graphics, bounds);
+    }
+
     private void ConfigureGraphicsQuality(Graphics g)
     {
         var smoothing = HighQualityRendering ? SmoothingMode.AntiAlias : SmoothingMode.None;
         var pixelOffset = HighQualityRendering ? PixelOffsetMode.HighQuality : PixelOffsetMode.None;
         var compositing = HighQualityRendering ? CompositingQuality.HighQuality : CompositingQuality.HighSpeed;
         var interpolation = HighQualityRendering ? InterpolationMode.HighQualityBicubic : InterpolationMode.NearestNeighbor;
-        // Framework quality setters validate/box enum values. Avoid repeating them on an already configured context.
+        // the quality setters validate and box enums, so skip them when the context is already set up
         if (g.SmoothingMode != smoothing) g.SmoothingMode = smoothing;
         if (g.PixelOffsetMode != pixelOffset) g.PixelOffsetMode = pixelOffset;
         if (g.CompositingQuality != compositing) g.CompositingQuality = compositing;
@@ -617,6 +948,93 @@ public sealed class VerticalProgressBar : ProgressBar
     {
         var dotSize = Math.Min(brickRect.Width, brickRect.Height) - 1;
         return dotSize < 1 ? 1 : dotSize;
+    }
+
+    private int GetActiveTop(VisualizationMode mode, Rectangle plot, int filledH)
+    {
+        if (mode is VisualizationMode.Bricks or VisualizationMode.Led or VisualizationMode.Dots)
+        {
+            if (_litBricks <= 0 || _brickRects.Count == 0) return plot.Bottom;
+            var rect = _brickRects[Math.Min(_litBricks, _brickRects.Count) - 1];
+            if (mode == VisualizationMode.Bricks) return rect.Top;
+            var size = mode == VisualizationMode.Led ? Math.Min(rect.Width, rect.Height) :
+                Math.Min(Math.Min(rect.Width, rect.Height), GetDotSizeFromBrick(rect) + 1);
+            return Math.Max(plot.Top, rect.Y + (rect.Height - size) / 2 - (HighQualityRendering ? 1 : 0));
+        }
+        if (filledH <= 0) return plot.Bottom;
+        if (mode == VisualizationMode.Wave) return Math.Max(plot.Top, plot.Bottom - filledH - 2);
+        if (mode == VisualizationMode.Lollipop)
+            return Math.Max(plot.Top, plot.Bottom - filledH - Math.Min(Math.Min(plot.Width, plot.Height + 1), 9) / 2 -
+                (HighQualityRendering ? 1 : 0));
+        return plot.Bottom - filledH;
+    }
+
+    private int GetStyledActiveTop(int activeTop, Rectangle plot, int filledH, float fillPercent, float range)
+    {
+        if (VisualStyle == VisualStyle.Glow && filledH > 0)
+            activeTop = Math.Min(activeTop, Math.Max(plot.Top, plot.Bottom - filledH - (HighQualityRendering ? 1 : 0)));
+        else if (VisualStyle == VisualStyle.Trail)
+        {
+            for (var i = 0; i < _trailLife.Length; i++)
+            {
+                if (_trailLife[i] <= 0 || _trailLevels[i] <= Minimum + 0.5f) continue;
+                var y = plot.Bottom - (int)Math.Round(Clamp01((_trailLevels[i] - Minimum) / range) * plot.Height);
+                if (y < plot.Bottom) activeTop = Math.Min(activeTop, Math.Max(plot.Top, y));
+            }
+        }
+        else if (VisualStyle == VisualStyle.Scanline)
+        {
+            var y = plot.Top + (int)Math.Round((1f - fillPercent) * Math.Max(0, plot.Height - 1));
+            activeTop = Math.Min(activeTop, Math.Max(plot.Top, y - (HighQualityRendering ? 1 : 0)));
+        }
+        return activeTop;
+    }
+
+    private int GetPaintedActiveTop(VisualizationMode mode, Rectangle plot, int filledH, float fillPercent, float range)
+    {
+        var activeTop = GetActiveTop(mode, plot, filledH);
+        var topEdge = mode is VisualizationMode.Center or VisualizationMode.Mirror
+            ? plot.Top + plot.Height / 2 : activeTop;
+        if (mode is not VisualizationMode.Led and not VisualizationMode.Dots and not VisualizationMode.Lollipop &&
+            filledH > 1 && topEdge >= plot.Top && topEdge <= plot.Bottom && HighQualityRendering)
+            activeTop = Math.Max(plot.Top, Math.Min(activeTop, topEdge - 1));
+        return GetStyledActiveTop(activeTop, plot, filledH, fillPercent, range);
+    }
+
+    private int ConstrainVisualPeak(VisualizationMode mode, Rectangle plot, int activeTop, float range)
+    {
+        var peakPercent = Clamp01((Clamp(_peakValue, Minimum, Maximum) - Minimum) / range);
+        var desiredAnchor = Math.Min(plot.Bottom - (int)Math.Round(plot.Height * peakPercent) +
+            GetSegmentedPeakOffset(mode, plot), activeTop);
+        var desiredLevel = Minimum + (plot.Bottom - desiredAnchor) * range / plot.Height;
+        if (!_visualPeakValid)
+        {
+            _visualPeakLevel = desiredLevel;
+            _visualPeakValid = true;
+        }
+        // resolve constraints before comparing render keys and before painting; once both levels
+        // hit the same pixel there's nothing left to draw, so painting isn't needed to settle
+        _visualPeakLevel = Math.Max(_visualPeakLevel, desiredLevel);
+        var anchor = Math.Min(desiredAnchor,
+            plot.Bottom - (int)Math.Round(plot.Height * Clamp01((_visualPeakLevel - Minimum) / range)));
+        _visualPeakReleasing = anchor < desiredAnchor;
+        if (!_visualPeakReleasing) _visualPeakLevel = desiredLevel;
+        return anchor;
+    }
+
+    private int GetSegmentedPeakOffset(VisualizationMode mode, Rectangle plot)
+    {
+        if (mode is not VisualizationMode.Bricks and not VisualizationMode.Led) return 0;
+        EnsureBrickGeometry(ClientRectangle);
+        if (_brickRects.Count == 0) return 0;
+        var highest = _brickRects[_brickRects.Count - 1];
+        var top = highest.Top;
+        if (mode == VisualizationMode.Led)
+            top += (highest.Height - Math.Min(highest.Width, highest.Height)) / 2;
+        if (HighQualityRendering) top--;
+        // shift only peak pixels, not measured levels: a segmented fill may stop short of 0 dB
+        // because a whole cell has to fit, and the fixed offset keeps the decay smooth
+        return Math.Max(plot.Top, top) - plot.Top;
     }
 
     private void DrawMode_CenterBricks(Graphics g, Rectangle bounds, int topInner, int bottomInner, int innerH, float fillPercent)
@@ -765,7 +1183,7 @@ public sealed class VerticalProgressBar : ProgressBar
         if (fillHeight <= 0)
             return;
 
-        // Keep the emphasis at the active edge so Glow never becomes a second filled visualization.
+        // emphasis stays on the active edge so Glow doesn't turn into a second filled bar
         var color = GetLevelColor(fillPercent);
         _glowOuterBrush.Color = Color.FromArgb(36, color);
         _glowMiddleBrush.Color = Color.FromArgb(76, color);
@@ -799,11 +1217,11 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private void DrawMode_Spectrum(Graphics g, Rectangle bounds)
     {
-        var padding = BrickPadding;
-        var innerX = bounds.X + padding;
-        var innerW = bounds.Width - (padding * 2);
-        var topInner = bounds.Top + padding;
-        var bottomInner = bounds.Bottom - padding;
+        var plot = PlotBounds;
+        var innerX = plot.X;
+        var innerW = plot.Width;
+        var topInner = plot.Top;
+        var bottomInner = plot.Bottom;
         if (innerW <= 0 || bottomInner <= topInner)
             return;
 
@@ -821,30 +1239,36 @@ public sealed class VerticalProgressBar : ProgressBar
     private void DrawGridlines(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH)
     {
         var levels = GridlineLevels;
-        if (levels == null || levels.Count == 0) return;
-
-        for (var i = 0; i < levels.Count; i++)
+        for (var i = 0; i < (levels?.Count ?? 0); i++)
         {
+            if (float.IsNaN(levels[i]) || float.IsInfinity(levels[i])) continue;
             var t = Clamp01(levels[i]);
             var y = bottomInner - (int)Math.Round(t * innerH);
             if (y < topInner || y > bottomInner) continue;
 
             g.DrawLine(_gridlinePen, innerX, y, innerX + innerW, y);
         }
+        var positions = VerticalGridlinePositions;
+        for (var i = 0; i < (positions?.Count ?? 0); i++)
+        {
+            var x = positions[i];
+            if (float.IsNaN(x) || float.IsInfinity(x) || x < 0 || x > ClientSize.Width) continue;
+            x = Math.Min(x, ClientSize.Width - 1);
+            g.DrawLine(_gridlinePen, x, topInner, x, bottomInner);
+        }
     }
 
     private void DrawStyleTrail(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH, float range)
     {
-        if (_peakValue <= Minimum + 0.5f)
-            return;
-
-        var percent = Clamp01((_peakValue - Minimum) / range);
-        var y = bottomInner - (int)Math.Round(percent * innerH);
-        if (y < topInner || y > bottomInner)
-            return;
-
-        using var pen = new Pen(Color.FromArgb(110, GetLevelColor(percent)), 1f);
-        g.DrawLine(pen, innerX, y, innerX + innerW - 1, y);
+        for (var i = 0; i < _trailLife.Length; i++)
+        {
+            if (_trailLife[i] <= 0 || _trailLevels[i] <= Minimum + 0.5f) continue;
+            var percent = Clamp01((_trailLevels[i] - Minimum) / range);
+            var y = bottomInner - (int)Math.Round(percent * innerH);
+            if (y < topInner || y >= bottomInner) continue;
+            _workBrush.Color = Color.FromArgb((int)(100 * _trailLife[i] / 0.4f), GetLevelColor(percent));
+            g.FillRectangle(_workBrush, innerX, y, innerW, 1);
+        }
     }
 
     private void DrawStyleScanline(Graphics g, int innerX, int innerW, int topInner, int innerH, float fillPercent)
@@ -869,7 +1293,7 @@ public sealed class VerticalProgressBar : ProgressBar
         }
     }
 
-    // Lighten the peak-height fill color so the marker stands out against the fill below it.
+    // lighten the fill color at the peak so the marker pops against the fill below
     private Color GetPeakColor(float peakPercent)
     {
         if (!PeakColorMatchesHeat) return PeakLineColor;
@@ -880,23 +1304,24 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private void DrawPeakMarker_Line(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH, float range)
     {
-        var pv = Clamp(_peakValue, Minimum, Maximum);
-        var peakPercent = Clamp01((pv - Minimum) / range);
-        var peakY = bottomInner - (int)Math.Round(innerH * peakPercent);
-
-        var thickness = Math.Min(innerH, Math.Max(1, PeakLineThickness));
-        var half = thickness / 2;
-
-        var peakRect = new Rectangle(innerX, peakY - half, innerW, thickness);
-        if (peakRect.Top < topInner) peakRect.Y = topInner;
-        if (peakRect.Bottom > bottomInner) peakRect.Y = bottomInner - thickness;
-
-        // A one-pixel surface separator remains visible when the fill and marker are both pale.
-        var separatorTop = Math.Max(topInner, peakRect.Top - 1);
-        var separatorBottom = Math.Min(bottomInner, peakRect.Bottom + 1);
-        _workBrush.Color = BackColor;
-        g.FillRectangle(_workBrush, innerX, separatorTop, innerW, separatorBottom - separatorTop);
+        var activeTop = RenderedActiveBounds.IsEmpty ? bottomInner : RenderedActiveBounds.Top;
+        var thickness = MarkerThickness;
+        // clearance can jump up instantly but releases at the same elapsed-time fall rate,
+        // so expiring trails or switching cells can't make the line drop suddenly
+        var anchor = ConstrainVisualPeak(GetVisualizationModeCached(), PlotBounds, activeTop, range);
+        var bottom = anchor - PeakGapPixels;
+        var top = bottom - thickness;
+        if (innerW <= 0 || top < BrickPadding || bottom > bottomInner) return;
+        var peakRect = new Rectangle(innerX, top, innerW, thickness);
+        RenderedPeakBounds = peakRect;
+        // whole-pixel fills keep the marker bounds exact even with the high-quality styles
+        var smoothing = g.SmoothingMode;
+        var offset = g.PixelOffsetMode;
+        if (smoothing != SmoothingMode.None) g.SmoothingMode = SmoothingMode.None;
+        if (offset != PixelOffsetMode.None) g.PixelOffsetMode = PixelOffsetMode.None;
         g.FillRectangle(_peakBrush, peakRect);
+        if (smoothing != SmoothingMode.None) g.SmoothingMode = smoothing;
+        if (offset != PixelOffsetMode.None) g.PixelOffsetMode = offset;
     }
 
     private void DrawPeakMarker_Dot(Graphics g, Rectangle bounds, int innerX, int innerW, int topInner, int bottomInner, int innerH, float range)
@@ -910,11 +1335,11 @@ public sealed class VerticalProgressBar : ProgressBar
 
         var dotSize = GetDotSizeFromBrick(_brickRects[0]);
         var x = innerX + ((innerW - dotSize) / 2);
-        var y = peakY - (dotSize / 2);
-
-        if (y < topInner) y = topInner;
-        if (y + dotSize > bottomInner) y = bottomInner - dotSize;
-
+        var activeTop = RenderedActiveBounds.IsEmpty ? bottomInner : RenderedActiveBounds.Top;
+        var fringe = HighQualityRendering ? 1 : 0;
+        var y = Math.Min(peakY, activeTop) - PeakGapPixels - dotSize - fringe;
+        if (y - fringe < BrickPadding) return;
+        RenderedPeakBounds = new Rectangle(x - fringe, y - fringe, dotSize + 2 * fringe, dotSize + 2 * fringe);
         g.FillEllipse(_peakBrush, x, y, dotSize, dotSize);
         if (dotSize >= 4)
             g.DrawEllipse(_peakOutlinePen, x, y, dotSize - 1, dotSize - 1);
@@ -928,61 +1353,72 @@ public sealed class VerticalProgressBar : ProgressBar
         peakY = Clamp(peakY, topInner, bottomInner);
 
         var tickWidth = Math.Min(innerW, 8);
-        var tickHeight = Math.Min(innerH + 1, Math.Max(1, PeakLineThickness));
+        var tickHeight = MarkerThickness;
         var tickX = innerX + ((innerW - tickWidth) / 2);
-        var tickY = Clamp(peakY - (tickHeight / 2), topInner, bottomInner - tickHeight + 1);
-        var separator = Rectangle.Intersect(new Rectangle(tickX - 1, tickY - 1, tickWidth + 2, tickHeight + 2),
-            new Rectangle(innerX, topInner, innerW, innerH));
-        _workBrush.Color = BackColor;
-        g.FillRectangle(_workBrush, separator);
+        var activeTop = RenderedActiveBounds.IsEmpty ? bottomInner : RenderedActiveBounds.Top;
+        var tickY = Math.Min(peakY, activeTop) - PeakGapPixels - tickHeight;
+        if (tickY < BrickPadding) return;
+        RenderedPeakBounds = new Rectangle(tickX, tickY, tickWidth, tickHeight);
         g.FillRectangle(_peakBrush, tickX, tickY, tickWidth, tickHeight);
     }
 
     private void EnsureBrickGeometry(Rectangle bounds)
     {
-        if (bounds.Width == _cachedWidth && bounds.Height == _cachedHeight)
+        var plot = PlotBounds;
+        if (bounds.Width == _cachedWidth && bounds.Height == _cachedHeight && plot == _cachedPlotBounds)
             return;
 
         _cachedWidth = bounds.Width;
         _cachedHeight = bounds.Height;
-        _litBricksValid = false; // Reset hysteresis when the bar geometry changes.
+        _cachedPlotBounds = plot;
+        _meterSurfacesDirty = true;
+        _litBricksValid = false; // geometry changed, so the hysteresis state is stale
 
         _brickRects.Clear();
         _brickCentres.Clear();
         _brickT.Clear();
         _brickHeatColors.Clear();
 
-        var pad = BrickPadding;
-        var innerX = bounds.X + pad;
-        var innerW = bounds.Width - (pad * 2);
-        var top = bounds.Top + pad;
-        var bottom = bounds.Bottom - pad;
+        var innerX = plot.X;
+        var innerW = plot.Width;
+        var top = plot.Top;
+        var bottom = plot.Bottom;
 
         if (innerW <= 0 || bottom <= top) return;
 
         var brickHeight = Math.Max(1, BrickHeight);
         var gap = Math.Max(0, BrickGap);
 
-        var y = bottom - brickHeight;
+        var y = (long)bottom - brickHeight;
         var innerH = Math.Max(1f, bottom - top);
 
         while (y >= top)
         {
-            var rect = new Rectangle(innerX, y, innerW, brickHeight);
+            var rect = new Rectangle(innerX, (int)y, innerW, brickHeight);
             _brickRects.Add(rect);
             _brickCentres.Add(rect.Top + (rect.Height / 2));
 
             var centerY = rect.Top + (rect.Height * 0.5f);
-            var t = (bottom - centerY) / innerH; // 0 at the bottom, 1 at the top.
+            var t = (bottom - centerY) / innerH; // 0 at the bottom, 1 at the top
             _brickT.Add(Clamp01(t));
 
-            y -= brickHeight + gap;
+            y -= (long)brickHeight + gap;
         }
 
         for (var i = 0; i < _brickRects.Count; i++)
             _brickHeatColors.Add(Color.Empty);
 
         _colorsDirty = true;
+    }
+
+    private void InvalidateBrickGeometry()
+    {
+        _meterSurfacesDirty = true;
+        _cachedWidth = _cachedHeight = -1;
+        _litBricksValid = false;
+        _colorsDirty = true;
+        _lastDisplayQ = _lastPeakQ = int.MinValue;
+        Invalidate();
     }
 
     private void RebuildBrickHeatColors()
@@ -1014,6 +1450,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private void BuildBrickHighlightBrush()
     {
+        _meterSurfacesDirty = true;
         _brickHighlightBrush?.Dispose();
         if (!BrickHighlight || HighlightAlpha <= 0)
         {
@@ -1025,7 +1462,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private Color GetLevelColor(float level01)
     {
-        // Use the fill's intensity curve so markers and Wave colors match the heat-map at the same height.
+        // same intensity curve as the fill, so markers and Wave colors match the heat-map at that height
         var t = level01;
         if (HeatmapEnabled)
         {
@@ -1052,7 +1489,7 @@ public sealed class VerticalProgressBar : ProgressBar
         return c;
     }
 
-    // Bricks are ordered bottom-up; this update is safe from both the animation tick and OnPaint.
+    // bricks are ordered bottom-up; safe to call from the animation tick or OnPaint
     private void UpdateLitBricks(Rectangle bounds, int bottomInner, int innerH, int filledH)
     {
         EnsureBrickGeometry(bounds);
@@ -1064,21 +1501,28 @@ public sealed class VerticalProgressBar : ProgressBar
         _litBricksValid = true;
     }
 
-    // Stop ticking when the bar and peak are settled.
+    // stop the timer once bar and peak have settled
     private bool IsSettled()
-        => _displayValue == _targetValue && _peakHoldLeftMs <= 0f && _peakValue <= _displayValue;
+        // a held peak on a stable bar doesn't animate; keep its hold time for the next drop
+        => _displayValue == _targetValue && _peakValue <= _displayValue &&
+            !_trailActive && !_visualPeakReleasing;
 
     private void AnimateStep(float dtSeconds, float intervalMs)
     {
         var mode    = GetVisualizationModeCached();
         var target  = (float)_targetValue;
+        if (_visualPeakValid)
+            _visualPeakLevel = Math.Max(Minimum,
+                _visualPeakLevel - Math.Max(0.01f, PeakDecayPerTick) * 60f * dtSeconds);
 
         var releaseMs = UseAsymmetricBallistics && ReleaseTimeMs > 0
             ? ReleaseTimeMs
             : ResponseTimeMs;
 
+        var previousDisplay = _displayValue;
         _displayValue = BarBallistics.StepLevel(
             _displayValue, target, dtSeconds, Maximum - Minimum, ResponseTimeMs, releaseMs, ModeSnapsDown(mode));
+        UpdateTrail(dtSeconds, previousDisplay);
 
         if (target <= Minimum && _displayValue <= (Minimum + SilentSnapEpsilon))
             _displayValue = Minimum;
@@ -1087,6 +1531,7 @@ public sealed class VerticalProgressBar : ProgressBar
         {
             _peakValue = _displayValue;
             _peakHoldLeftMs = 0;
+            _visualPeakValid = _visualPeakReleasing = false;
         }
         else
         {
@@ -1097,6 +1542,30 @@ public sealed class VerticalProgressBar : ProgressBar
                 _peakValue = Minimum;
                 _peakHoldLeftMs = 0;
             }
+        }
+        if (mode is VisualizationMode.Dots or VisualizationMode.Lollipop ||
+            _peakValue <= Minimum + 0.5f && _visualPeakLevel <= Minimum + 0.5f)
+            _visualPeakValid = _visualPeakReleasing = false;
+    }
+
+    private void UpdateTrail(float elapsed, float previousDisplay)
+    {
+        _trailActive = false;
+        if (VisualStyle != VisualStyle.Trail) return;
+        _trailSampleElapsed += elapsed;
+        for (var i = 0; i < _trailLife.Length; i++)
+        {
+            _trailLife[i] = Math.Max(0, _trailLife[i] - elapsed);
+            _trailActive |= _trailLife[i] > 0;
+        }
+        if (elapsed <= 0.4f && Math.Abs(previousDisplay - _displayValue) > 0.05f &&
+            previousDisplay > Minimum + 0.5f && (_trailSampleElapsed >= 0.04f || !_trailActive))
+        {
+            _trailLevels[_trailWrite] = previousDisplay;
+            _trailLife[_trailWrite] = 0.4f;
+            _trailWrite = (_trailWrite + 1) % _trailLife.Length;
+            _trailSampleElapsed = 0;
+            _trailActive = true;
         }
     }
 
@@ -1109,14 +1578,16 @@ public sealed class VerticalProgressBar : ProgressBar
             return;
         }
 
-        // Convert the per-60-Hz peak decay to a rate so it is refresh-rate independent.
+        // turn the per-60-Hz decay into a rate so it doesn't depend on refresh rate
         var decayPerSecond = Math.Max(0.01f, PeakDecayPerTick) * 60f;
 
+        // catch real transients even if the smoothed attack hasn't gotten there yet
+        var peakInput = Math.Max(_displayValue, Clamp(_targetValue, Minimum, Maximum));
         BarBallistics.StepPeak(
-            ref _peakValue, ref _peakHoldLeftMs, _displayValue, intervalMs, PeakHoldMilliseconds, decayPerSecond, Minimum);
+            ref _peakValue, ref _peakHoldLeftMs, peakInput, intervalMs, PeakHoldMilliseconds, decayPerSecond, Minimum);
     }
 
-    // Repaint only when the painted state changes; 1/1024 level quantization avoids sub-brick repaints.
+    // only repaint on a visible change; 1/1024 quantization avoids sub-brick repaints
     private bool ComputeShouldInvalidate(VisualizationMode mode)
     {
         var dq = ComputeRenderKey(mode, out var pq, out var filledH);
@@ -1124,19 +1595,24 @@ public sealed class VerticalProgressBar : ProgressBar
         var displayColor = mode is VisualizationMode.Spectrum or VisualizationMode.Wave or VisualizationMode.Lollipop
             ? GetLevelColor(Clamp01((_displayValue - Minimum) / range)) : Color.Empty;
         var peakColor = pq >= 0 ? GetPeakColor(Clamp01((_peakValue - Minimum) / range)) : Color.Empty;
+        var trailKey = 0;
+        if (VisualStyle == VisualStyle.Trail)
+            for (var i = 0; i < _trailLife.Length; i++)
+                unchecked { trailKey = trailKey * 31 + (int)(_trailLife[i] * 100) + (int)_trailLevels[i]; }
 
         var changed =
             dq != _lastDisplayQ ||
             pq != _lastPeakQ ||
             displayColor != _lastDisplayColor ||
             peakColor != _lastPeakColor ||
-            mode != _lastModeQ;
+            mode != _lastModeQ || trailKey != _lastTrailQ;
 
         _lastDisplayQ = dq;
         _lastPeakQ = pq;
         _lastDisplayColor = displayColor;
         _lastPeakColor = peakColor;
         _lastModeQ = mode;
+        _lastTrailQ = trailKey;
 
         return changed;
     }
@@ -1147,36 +1623,50 @@ public sealed class VerticalProgressBar : ProgressBar
         filledH = 0;
 
         var bounds = ClientRectangle;
-        var padding = BrickPadding;
-        var topInner = bounds.Top + padding;
-        var bottomInner = bounds.Bottom - padding;
-        if (bounds.Width <= 0 || bounds.Height <= 0 || bounds.Width - (padding * 2) <= 0 || bottomInner <= topInner)
+        var plot = PlotBounds;
+        var topInner = plot.Top;
+        var bottomInner = plot.Bottom;
+        if (plot.Width <= 0 || bottomInner <= topInner)
+        {
+            _visualPeakReleasing = false;
             return 0;
+        }
 
         var innerH = Math.Max(1, bottomInner - topInner);
         float range = Math.Max(1, Maximum - Minimum);
         var fillPercent = Clamp01((_displayValue - Minimum) / range);
         filledH = (int)Math.Round(innerH * fillPercent);
 
-        if (PeakHoldEnabled && ModeHasPeakMarker(mode) && _peakValue > Minimum + 0.5f)
+        if (mode is VisualizationMode.Bricks or VisualizationMode.Led or VisualizationMode.Dots)
+            UpdateLitBricks(bounds, bottomInner, innerH, filledH);
+        if (PeakHoldEnabled && ModeHasPeakMarker(mode) &&
+            (_peakValue > Minimum + 0.5f || _visualPeakValid && _visualPeakLevel > Minimum + 0.5f))
         {
-            var peakPercent = Clamp01((Clamp(_peakValue, Minimum, Maximum) - Minimum) / range);
-            peakKey = mode == VisualizationMode.Lollipop
-                ? (int)Math.Round(peakPercent * 1024f)
-                : (int)Math.Round(innerH * peakPercent);
+            if (mode is VisualizationMode.Dots or VisualizationMode.Lollipop)
+            {
+                var peakPercent = Clamp01((Clamp(_peakValue, Minimum, Maximum) - Minimum) / range);
+                peakKey = mode == VisualizationMode.Lollipop
+                    ? (int)Math.Round(peakPercent * 1024f) : (int)Math.Round(innerH * peakPercent);
+            }
+            else
+            {
+                var activeTop = GetPaintedActiveTop(mode, plot, filledH, fillPercent, range);
+                peakKey = bottomInner - ConstrainVisualPeak(mode, plot, activeTop, range);
+            }
         }
+        else
+            _visualPeakValid = _visualPeakReleasing = false;
 
         switch (mode)
         {
             case VisualizationMode.Lollipop:
-                // Heat-colored markers can change between pixel rows.
+                // heat-colored markers can change color between pixel rows
                 return (int)Math.Round(fillPercent * 1024f);
 
             case VisualizationMode.Bricks:
             case VisualizationMode.Led:
             case VisualizationMode.Dots:
             {
-                UpdateLitBricks(bounds, bottomInner, innerH, filledH);
                 return _litBricks;
             }
 
@@ -1229,6 +1719,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private void EnsureTimerConfigured_NoLock()
     {
+        if (!Visible || IsDisposed || Disposing) return;
         if (s_timer == null)
         {
             s_timer = new System.Windows.Forms.Timer();
@@ -1238,7 +1729,7 @@ public sealed class VerticalProgressBar : ProgressBar
         }
 
         var fps = Math.Max(15, AnimationFps);
-        // Request just under the frame period because WinForms rounds timer intervals up to the next system tick.
+        // ask for slightly under the frame period, WinForms rounds timer intervals up to the next system tick
         var interval = Math.Max(4, (int)Math.Floor(1000.0 / fps) - 1);
 
         if (s_timer.Interval != interval)
@@ -1260,8 +1751,6 @@ public sealed class VerticalProgressBar : ProgressBar
 
             var dt = (float)((now - last) / (double)Stopwatch.Frequency);
             if (dt <= 0) dt = 1f / 60f;
-            if (dt > 0.2f) dt = 0.2f;
-
             var intervalMs = dt * 1000f;
 
             var anyInvalidated = false;
@@ -1274,6 +1763,7 @@ public sealed class VerticalProgressBar : ProgressBar
                     s_instances.RemoveAt(i);
                     continue;
                 }
+                if (!ctrl.Visible) continue;
 
                 ctrl.AnimateStep(dt, intervalMs);
                 anyAnimating |= !ctrl.IsSettled();

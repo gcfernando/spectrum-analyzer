@@ -1,11 +1,10 @@
+// Developer :: > Gehan Fernando
 using System;
 
 namespace Spectrum.Dsp;
 
-/// <summary>In-place, unnormalized radix-2 FFT with precomputed twiddles; callers own the work arrays.</summary>
 internal sealed class RadixTwoFft
 {
-    // Each stage's twiddles occupy indices h through 2h−1, where h is half the butterfly span.
     private readonly double[] _cos;
     private readonly double[] _sin;
     private readonly int[] _swapA;
@@ -40,7 +39,6 @@ internal sealed class RadixTwoFft
             bits++;
         }
 
-        // Store only index pairs that need swapping.
         var pairs = 0;
         var reverse = new int[length];
         for (var i = 0; i < length; i++)
@@ -71,7 +69,7 @@ internal sealed class RadixTwoFft
         }
     }
 
-    /// <summary>Transforms (re, im) in place; both arrays must contain at least <see cref="Length"/> elements.</summary>
+    // Hand-rolled FFT so the hot path stays allocation-free; the first two stages are unrolled for speed.
     public void Forward(double[] re, double[] im)
     {
         var n = Length;
@@ -84,7 +82,6 @@ internal sealed class RadixTwoFft
             (im[i], im[j]) = (im[j], im[i]);
         }
 
-        // Handle the span-2 stage directly.
         for (var a = 0; a < n; a += 2)
         {
             var tr = re[a + 1];
@@ -95,7 +92,6 @@ internal sealed class RadixTwoFft
             im[a] += ti;
         }
 
-        // Handle the span-4 stage directly.
         for (var a = 0; a < n; a += 4)
         {
             var tr = re[a + 2];
@@ -105,7 +101,6 @@ internal sealed class RadixTwoFft
             re[a] += tr;
             im[a] += ti;
 
-            // Multiplication by −j maps re + j·im to im − j·re.
             tr = im[a + 3];
             ti = -re[a + 3];
             re[a + 3] = re[a + 1] - tr;

@@ -1,10 +1,11 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace Spectrum.Dsp;
 
-/// <summary>A lock-free single-producer/single-consumer ring for recent interleaved audio frames.</summary>
+// Ring buffer shared between the WASAPI callback and the analysis timer, so no locks allowed on the audio thread.
 internal sealed class SampleHistory
 {
     private const int MaxSnapshotAttempts = 4;
@@ -12,10 +13,8 @@ internal sealed class SampleHistory
     private readonly float[] _ring;
     private readonly int _capacityFrames;
 
-    // Number of fully written frames visible to the consumer.
     private long _committedFrames;
 
-    // Exclusive upper bound of frames the producer may currently be writing.
     private long _reservedFrames;
 
     public SampleHistory(int channels, int capacityFrames)
@@ -38,10 +37,8 @@ internal sealed class SampleHistory
     public int Channels { get; }
     public int CapacityFrames => _capacityFrames;
 
-    /// <summary>Total committed frames, used to detect a stalled stream.</summary>
     public long TotalFrames => Interlocked.Read(ref _committedFrames);
 
-    /// <summary>Appends interleaved 32-bit float samples from an unmanaged buffer.</summary>
     public void Write(IntPtr buffer, int byteLength)
     {
         if (buffer == IntPtr.Zero || byteLength <= 0)
@@ -60,16 +57,14 @@ internal sealed class SampleHistory
         var sourceOffsetSamples = 0;
         if (frames > _capacityFrames)
         {
-            // Skip samples that would be overwritten immediately.
             sourceOffsetSamples = (frames - _capacityFrames) * Channels;
             frames = _capacityFrames;
         }
 
-        var committed = Interlocked.Read(ref _committedFrames); // The producer is the only writer.
+        var committed = Interlocked.Read(ref _committedFrames);
         var endFrame = committed + inputFrames;
-        Interlocked.Exchange(ref _reservedFrames, endFrame); // Publish the reservation before overwriting samples.
+        Interlocked.Exchange(ref _reservedFrames, endFrame);
 
-        // Oversized writes retain only their tail, but frame positions remain absolute.
         var firstStoredFrame = endFrame - frames;
         var ringFrame = (int)(firstStoredFrame % _capacityFrames);
         var firstFrames = Math.Min(frames, _capacityFrames - ringFrame);
@@ -81,24 +76,43 @@ internal sealed class SampleHistory
             Marshal.Copy(IntPtr.Add(src, firstFrames * Channels * sizeof(float)), _ring, 0, (frames - firstFrames) * Channels);
         }
 
-        Interlocked.Exchange(ref _committedFrames, endFrame); // Publish samples before advancing the committed count.
+        Interlocked.Exchange(ref _committedFrames, endFrame);
     }
 
-    /// <summary>Appends interleaved samples from a managed array.</summary>
     public void Write(float[] interleaved, int frameCount)
     {
-        var handle = GCHandle.Alloc(interleaved, GCHandleType.Pinned);
-        try
+        if (interleaved == null)
         {
-            Write(handle.AddrOfPinnedObject(), frameCount * Channels * sizeof(float));
+            throw new ArgumentNullException(nameof(interleaved));
         }
-        finally
+
+        if (frameCount < 0 || frameCount > interleaved.Length / Channels)
         {
-            handle.Free();
+            throw new ArgumentOutOfRangeException(nameof(frameCount), frameCount, "Source must contain all requested frames.");
         }
+
+        if (frameCount == 0)
+        {
+            return;
+        }
+
+        var frames = Math.Min(frameCount, _capacityFrames);
+        var sourceOffset = (frameCount - frames) * Channels;
+        var endFrame = Interlocked.Read(ref _committedFrames) + frameCount;
+        Interlocked.Exchange(ref _reservedFrames, endFrame);
+
+        var ringFrame = (int)((endFrame - frames) % _capacityFrames);
+        var firstFrames = Math.Min(frames, _capacityFrames - ringFrame);
+        Array.Copy(interleaved, sourceOffset, _ring, ringFrame * Channels, firstFrames * Channels);
+        if (frames > firstFrames)
+        {
+            Array.Copy(interleaved, sourceOffset + firstFrames * Channels, _ring, 0, (frames - firstFrames) * Channels);
+        }
+
+        Interlocked.Exchange(ref _committedFrames, endFrame);
     }
 
-    /// <summary>Copies the latest frames oldest-first, zero-filling missing or discarded frames; returns false if overwritten during the copy.</summary>
+    // Reader never blocks the writer; it just copies and then checks afterwards whether the writer lapped it.
     public bool TryCopyLatest(float[] destination, int frames, out long endFrame, long discardBeforeFrame = 0)
     {
         if (frames < 1 || frames > _capacityFrames)
@@ -132,10 +146,9 @@ internal sealed class SampleHistory
                 Array.Copy(_ring, 0, destination, (missing + firstFrames) * Channels, (available - firstFrames) * Channels);
             }
 
-            Interlocked.MemoryBarrier(); // Complete sample reads before checking for overwritten data.
+            Interlocked.MemoryBarrier();
             var reserved = Interlocked.Read(ref _reservedFrames);
 
-            // The snapshot is safe if the producer has not advanced beyond its end plus ring capacity.
             if (reserved - startFrame <= _capacityFrames)
             {
                 endFrame = end;

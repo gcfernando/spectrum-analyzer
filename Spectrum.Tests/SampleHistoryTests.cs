@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -6,6 +7,7 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
+// Tests the rolling sample history: gap handling, frame counting and snapshots while a producer thread hammers it.
 public class SampleHistoryTests
 {
     private readonly Xunit.Abstractions.ITestOutputHelper _out;
@@ -58,7 +60,7 @@ public class SampleHistoryTests
     [Fact]
     public void FramesBeforeAGap_AreExcludedFromTheSnapshot()
     {
-        // 50 frames before the pause; 10 frames after resume.
+        // 50 frames go in before the pause, then 10 after resume.
         var h = new SampleHistory(1, 64);
         h.Write(Ramp(0, 50, 1), 50);
         h.Write(Ramp(50, 10, 1), 10);
@@ -69,7 +71,7 @@ public class SampleHistoryTests
         Assert.Equal(60, end);
         for (var i = 0; i < 22; i++)
         {
-            Assert.Equal(0f, dest[i]); // Pre-gap audio is replaced by silence.
+            Assert.Equal(0f, dest[i]);
         }
 
         for (var i = 0; i < 10; i++)
@@ -77,7 +79,7 @@ public class SampleHistoryTests
             Assert.Equal((50 + i) * 10f, dest[22 + i]);
         }
 
-        // Once enough new audio arrives, the gap no longer affects the window.
+        // Once enough fresh audio shows up, the gap shouldn't leak into the window anymore.
         h.Write(Ramp(60, 40, 1), 40);
         Assert.True(h.TryCopyLatest(dest, 32, out _, discardBeforeFrame: 50));
         Assert.Equal(68 * 10f, dest[0]);
@@ -90,7 +92,7 @@ public class SampleHistoryTests
         h.Write(Ramp(0, 40, 1), 40);
         var dest = new float[16];
         Assert.True(h.TryCopyLatest(dest, 16, out var end));
-        Assert.Equal(40, end); // Frame accounting remains absolute even when only the tail can be retained.
+        Assert.Equal(40, end);
         for (var i = 0; i < 16; i++)
         {
             Assert.Equal((24 + i) * 10f, dest[i]);
@@ -116,13 +118,13 @@ public class SampleHistoryTests
     [Fact]
     public async Task ConcurrentProducer_NeverYieldsATornSnapshot()
     {
-        // Producer writes a strictly increasing frame counter; snapshots must be contiguous runs of frames.
+        // Producer writes an ever-increasing frame counter, so any snapshot we take has to be a contiguous run.
         const int channels = 2, window = 4096, chunk = 480;
-        // Capacity is window + one in-flight chunk; snapshots only copy while the producer stays behind.
+        // Capacity is the window plus one chunk in flight, so snapshots only copy while the producer is behind.
         var h = new SampleHistory(channels, window + chunk);
         using var stop = new CancellationTokenSource();
 
-        // Ramp keeps producer writes memcpy-fast.
+        // Ramp data keeps the producer writes cheap (memcpy-fast).
         const int cycle = chunk * 136;
         var ramp = new float[cycle * channels];
         for (var i = 0; i < cycle; i++)
@@ -154,7 +156,7 @@ public class SampleHistoryTests
         int accepted = 0, rejected = 0;
         try
         {
-            // Run for at least 2 s or until evidence is clear; loaded machines just wait a bit longer.
+            // Runs for a couple of seconds at least; slow machines just take a little longer.
             var started = DateTime.UtcNow;
             while ((DateTime.UtcNow - started < TimeSpan.FromSeconds(2) || accepted < 200 || rejected == 0)
                    && DateTime.UtcNow - started < TimeSpan.FromSeconds(60))
@@ -184,7 +186,7 @@ public class SampleHistoryTests
         }
         finally
         {
-            stop.Cancel(); // Never leave the producer spinning on failure.
+            stop.Cancel();
         }
 
         await producer;

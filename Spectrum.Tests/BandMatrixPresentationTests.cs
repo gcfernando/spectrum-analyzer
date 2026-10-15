@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -10,6 +11,7 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
+// Makes sure the band matrix presents values and layout the way the UI expects.
 public class BandMatrixPresentationTests
 {
     private static T Field<T>(object target, string name) => CombinedRandomizationTests.GetField<T>(target, name);
@@ -171,7 +173,6 @@ public class BandMatrixPresentationTests
         });
     }
 
-    // Actual renderer contact sheet with no image-file output.
     public static string RenderPresentationContactSheet()
     {
         string result = null;

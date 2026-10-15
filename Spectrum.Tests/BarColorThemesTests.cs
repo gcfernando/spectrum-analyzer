@@ -1,9 +1,11 @@
+// Developer :: > Gehan Fernando
 using System;
 using Spectrum;
 using Xunit;
 
 namespace Spectrum.Tests;
 
+// Colour themes should always hand back usable colours, whatever theme gets picked.
 public class BarColorThemesTests
 {
     [Theory]

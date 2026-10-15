@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Diagnostics;
 using System.Drawing;
@@ -13,6 +14,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
+// Covers the newer analytical view modes: layout, scaling and how they paint into a bitmap.
 public class NewAnalyticalModeTests
 {
     private readonly ITestOutputHelper _output;
@@ -205,11 +207,11 @@ public class NewAnalyticalModeTests
             var peak = BarColorThemes.Studio.Ui.PrimaryText.ToArgb();
             var firstLength = CountTracePixels(bitmap, firstY, peak);
             var secondLength = CountTracePixels(bitmap, secondY, peak);
-            Assert.InRange(firstLength, 78, 92); // 2 seconds in a 20-second, 842-pixel plotting area.
-            Assert.InRange(secondLength / (double)firstLength, 1.4, 1.6); // 3 seconds uses 1.5× the width.
+            Assert.InRange(firstLength, 78, 92);
+            Assert.InRange(secondLength / (double)firstLength, 1.4, 1.6);
             for (var x = 490; x < 575; x++)
             for (var y = firstY - 2; y <= secondY + 2; y++)
-                Assert.NotEqual(peak, bitmap.GetPixel(x, y).ToArgb()); // Missing source interval stays empty.
+                Assert.NotEqual(peak, bitmap.GetPixel(x, y).ToArgb());
             data.UpdateObservedWindow(new float[1000], 1000, 1, 1000, 13000, 12000, 0, new object());
             control.SetAudioData(data);
             using var newEpoch = VisualizationReadabilityTests.Render(control);

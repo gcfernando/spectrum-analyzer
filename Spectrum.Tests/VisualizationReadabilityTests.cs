@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -12,6 +13,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
+// Readability checks for the visuals: contrast, text fit and render cost.
 public class VisualizationReadabilityTests
 {
     private readonly ITestOutputHelper _output;
@@ -43,7 +45,7 @@ public class VisualizationReadabilityTests
                 minimumDelta = Math.Min(minimumDelta, DeltaE(colors[i - 1], colors[i]));
         }
         _output.WriteLine($"{name}: minimum adjacent CIELAB DeltaE76 {minimumDelta:F2}; minimum signal/surface contrast {minimumContrast:F2}:1");
-        // 16 is a palette design regression target, not a WCAG requirement or a proof of perceived quality.
+        // The 16 is a design target to catch palette regressions - not a WCAG rule and not proof it looks good.
         Assert.True(minimumDelta >= 16, $"{name}: adjacent DeltaE76 {minimumDelta:F2}");
         Assert.True(minimumContrast >= 3, $"{name}: signal/surface contrast {minimumContrast:F2}");
         foreach (var surface in new[] { theme.Ui.Canvas, theme.Ui.ControlSurface, theme.Ui.Selection, theme.Ui.Surface })
@@ -162,10 +164,27 @@ public class VisualizationReadabilityTests
             bar.PeakLineColor = theme.Ui.PrimaryText;
             CombinedRandomizationTests.SetField(bar, "_peakValue", 255f);
             using var bitmap = Render(bar);
-            var top = (bar.Height - bar.ClientSize.Height) / 2 + bar.BrickPadding;
-            Assert.Equal(theme.Ui.PrimaryText.ToArgb(), bitmap.GetPixel(9, top).ToArgb());
-            Assert.Equal(bar.BackColor.ToArgb(), bitmap.GetPixel(9, top + 2).ToArgb());
-            Assert.NotEqual(bar.BackColor.ToArgb(), bitmap.GetPixel(9, top + 3).ToArgb());
+            var peak = bar.RenderedPeakBounds;
+            var active = bar.RenderedActiveBounds;
+            // DrawToBitmap also captures the ProgressBar's native non-client frame, while painter bounds are client-local.
+            var bitmapOffset = new Point((bar.Width - bar.ClientSize.Width) / 2,
+                (bar.Height - bar.ClientSize.Height) / 2);
+            var sampleX = bitmapOffset.X + bar.PlotBounds.Left + bar.PlotBounds.Width / 2;
+            Assert.False(peak.IsEmpty);
+            Assert.False(active.IsEmpty);
+            Assert.Equal(bar.PlotBounds.Top, active.Top);
+            Assert.Equal(bar.PeakGapPixels, active.Top - peak.Bottom);
+            for (var y = peak.Top; y < peak.Bottom; y++)
+                Assert.Equal(theme.Ui.PrimaryText.ToArgb(), bitmap.GetPixel(sampleX, bitmapOffset.Y + y).ToArgb());
+            for (var y = peak.Bottom; y < active.Top; y++)
+                Assert.Equal(bar.BackColor.ToArgb(), bitmap.GetPixel(sampleX, bitmapOffset.Y + y).ToArgb());
+            Assert.NotEqual(bar.BackColor.ToArgb(), bitmap.GetPixel(sampleX, bitmapOffset.Y + active.Top).ToArgb());
+            bar.PeakHoldEnabled = false;
+            using var withoutPeak = Render(bar);
+            for (var y = active.Top; y < active.Bottom; y++)
+            for (var x = active.Left; x < active.Right; x++)
+                Assert.Equal(withoutPeak.GetPixel(bitmapOffset.X + x, bitmapOffset.Y + y).ToArgb(),
+                    bitmap.GetPixel(bitmapOffset.X + x, bitmapOffset.Y + y).ToArgb());
         });
     }
 
@@ -302,8 +321,8 @@ public class VisualizationReadabilityTests
                 var qualityAllocationBefore = GC.GetAllocatedBytesForCurrentThread();
                 for (var i = 0; i < 400; i++) configure(graphics[0]);
                 _output.WriteLine($"Graphics quality configuration: {(GC.GetAllocatedBytesForCurrentThread() - qualityAllocationBefore) / 400d:F1} bytes/call");
-                // DrawToBitmap performs WM_PRINT and a bitmap copy for each control. Capture cost is
-                // reported separately; the application's renderer budget applies to its OnPaint work.
+                // DrawToBitmap does a WM_PRINT plus a bitmap copy per control, so that cost is reported on its own.
+                // The renderer's budget only applies to its OnPaint work.
                 for (var frame = 0; frame < 10; frame++)
                 for (var i = 0; i < bars.Length; i++) painters[i](paintArgs[i]);
                 const int paintFrames = 400;
@@ -328,7 +347,7 @@ public class VisualizationReadabilityTests
         });
     }
 
-    // Returns an actual offscreen renderer comparison without creating a prohibited image file.
+    // Does a real offscreen renderer comparison without writing any image file.
     public static string RenderThemeContactSheet()
     {
         string result = null;

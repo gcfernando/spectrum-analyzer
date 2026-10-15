@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Linq;
 using Spectrum.Dsp;
@@ -5,13 +6,13 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
-/// <summary>Stereo means mean L/R power; one channel reads −3.01 dB and phase is irrelevant.</summary>
+// Stereo is the mean of L/R power, so a single channel reads -3.01 dB and phase doesn't matter.
 public class StereoTests
 {
     private const int Fs = 48000;
     private static readonly BandPlan Plan = Signals.DefaultEngine(Fs).Plan;
 
-    // Band-centre tones keep the tone well inside its band.
+    // Tones at band centres so they sit comfortably inside their band.
     private static readonly double Hz = Plan[50].CenterHz;
     private static readonly double Hz2 = Plan[66].CenterHz;
     private static readonly double OneChannelDb = 10 * Math.Log10(0.5);
@@ -50,7 +51,7 @@ public class StereoTests
     [Fact]
     public void AntiPhase_DoesNotCancel()
     {
-        // The mono result is −∞ dB here; the total energy must not vanish.
+        // Mono sums to minus infinity dB here, but the total energy still can't vanish.
         Assert.InRange(BandDb(Stereo(n => S(Hz, 1, n), n => -S(Hz, 1, n))), -0.05, 0.05);
     }
 
@@ -80,7 +81,7 @@ public class StereoTests
     [Fact]
     public void MultichannelDevice_AnalysesTheFrontPair()
     {
-        // Only front L/R channels are measured.
+        // Only the front L/R channels get measured.
         var engine = Signals.DefaultEngine(Fs, 6);
         Assert.Equal(2, engine.AnalysedChannels);
         var front = Signals.Interleaved(engine.RequiredFrames, 6, (c, n) => c < 2 ? S(Hz, 1, n) : 0);
@@ -90,6 +91,7 @@ public class StereoTests
     }
 }
 
+// Tiny, huge and subnormal inputs shouldn't produce NaN or infinity anywhere.
 public class NumericalSafetyTests
 {
     [Fact]
@@ -102,9 +104,9 @@ public class NumericalSafetyTests
     }
 
     [Theory]
-    [InlineData(1e-6)]   // −120 dBFS
-    [InlineData(1e-20)]  // Well below normal float precision
-    [InlineData(1e-40)]  // Subnormal float
+    [InlineData(1e-6)]
+    [InlineData(1e-20)]
+    [InlineData(1e-40)]
     public void ExtremelyLowLevels_StayFiniteAndBelowTheFloor(double amp)
     {
         var engine = Signals.DefaultEngine();
@@ -140,7 +142,7 @@ public class NumericalSafetyTests
     {
         var engine = Signals.DefaultEngine();
         var db = Signals.AnalyzeDb(engine, Signals.StereoSine(engine.RequiredFrames, 48000, engine.Plan[50].CenterHz, 1e6, 1e6));
-        Assert.InRange(db.Max(), 119.9, 120.1); // Reports +120 dBFS honestly.
+        Assert.InRange(db.Max(), 119.9, 120.1);
         Assert.Equal(255, LevelScale.ToDisplayByte(db.Max()));
     }
 

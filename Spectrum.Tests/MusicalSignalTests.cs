@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Linq;
 using Spectrum.Dsp;
@@ -6,7 +7,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
-/// <summary>Synthetic musical material checks harmonics, pitch motion, and rhythm in measurement output.</summary>
+// Feeds synthetic music-like signals (harmonic tones, bass walks, drums) through the analyzer to check harmonics, pitch and rhythm come out right.
 public class MusicalSignalTests
 {
     private const int Fs = 48000;
@@ -21,7 +22,7 @@ public class MusicalSignalTests
     [Fact]
     public void HarmonicTone_ShowsFundamentalAndResolvableOvertonesAsSeparatePeaks()
     {
-        // A3 220 Hz with 1/k harmonics; bright string/brass tone at −12 dBFS.
+        // Bright 220 Hz tone with falling harmonics, so we can check each overtone shows up at the right level.
         var engine = Signals.DefaultEngine(Fs);
         const double f0 = 220;
         var buf = Signals.Interleaved(engine.RequiredFrames, 2, (_, n) =>
@@ -35,13 +36,11 @@ public class MusicalSignalTests
             peaks[k] = Math.Max(db[bar], Math.Max(db[bar - 1], db[bar + 1]));
             _out.WriteLine($"harmonic {k} ({f0 * k} Hz) -> bar {bar}: {db[bar]:F1} dB (neighbours {db[bar - 1]:F1} / {db[bar + 1]:F1})");
 
-            // A 0.25/k partial is 20·log10(0.25/k); allow for edge-sharing.
             Assert.InRange(peaks[k], (20 * Math.Log10(0.25 / k)) - 3.2, (20 * Math.Log10(0.25 / k)) + 0.1);
         }
 
         for (var k = 1; k <= 5; k++)
         {
-            // Consecutive harmonics should stay as separate peaks.
             var from = BarOf(engine.Plan, f0 * k) + 1;
             var to = BarOf(engine.Plan, f0 * (k + 1)) - 1;
             var dip = Enumerable.Range(from, to - from + 1).Min(i => db[i]);
@@ -52,7 +51,7 @@ public class MusicalSignalTests
     [Fact]
     public void BassLine_PitchMovementMovesTheFundamentalBar()
     {
-        // Chromatic bass walk E1→E2, three harmonics per note.
+        // Walking bass line: the tracked pitch should follow each note as it steps up.
         var engine = Signals.DefaultEngine(Fs);
         var previous = -1;
         var bars = new int[13];
@@ -63,7 +62,6 @@ public class MusicalSignalTests
                 Signals.Sine(f, 0.5, n, Fs) + Signals.Sine(2 * f, 0.25, n, Fs) + Signals.Sine(3 * f, 0.12, n, Fs));
             var db = Signals.AnalyzeDb(engine, buf);
 
-            // Strongest bar at or below 1.5f is the fundamental.
             var limit = BarOf(engine.Plan, 1.5 * f);
             var bar = Enumerable.Range(0, limit).OrderByDescending(i => db[i]).First();
             bars[semitone] = bar;
@@ -82,7 +80,7 @@ public class MusicalSignalTests
     [Fact]
     public void KickDrum_EnergyLandsInTheBassBarsNotTheHighs()
     {
-        // Kick: 120→45 Hz sweep, 90 ms decay, every 500 ms.
+        // Kick drum pattern, to confirm the beat shows up at the expected tempo.
         var engine = Signals.DefaultEngine(Fs);
         double Kick(long n)
         {
@@ -110,7 +108,6 @@ public class MusicalSignalTests
     [Fact]
     public void HiHat_EnergyLandsInTheHighBarsNotTheBass()
     {
-        // Hi-hat: 40 ms high-passed noise bursts at 8/s.
         var engine = Signals.DefaultEngine(Fs);
         var white = Signals.WhiteNoise(Fs * 2, 0.3, 5);
         double Hat(long n)

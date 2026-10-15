@@ -1,7 +1,9 @@
+// Developer :: > Gehan Fernando
 using System;
 
 namespace Spectrum;
 
+// Optional overlay effects a visualizer mode can layer on top of its base drawing
 internal enum VisualStyle
 {
     None,
@@ -12,9 +14,11 @@ internal enum VisualStyle
     Precision
 }
 
+// Helpers that map mode names to the styles each one actually supports
 internal static class VisualStyles
 {
     internal static readonly string[] Names = { "None", "Pulse", "Glow", "Trail", "Scanline", "Precision" };
+    // Pre-built lists per mode family so we don't allocate on every lookup
     private static readonly string[] s_noStyles = { "None" };
     private static readonly string[] s_meterStyles = { "None", "Scanline", "Precision" };
     private static readonly string[] s_ledStyles = { "None", "Pulse", "Scanline", "Precision" };
@@ -22,6 +26,7 @@ internal static class VisualStyles
     private static readonly string[] s_advancedStyles = { "None", "Scanline", "Precision" };
     private static readonly string[] s_measurementStyles = { "None", "Precision" };
 
+    // Cleans up saved/user text into a known style name, falling back to None
     internal static string Resolve(string value)
     {
         foreach (var name in Names)
@@ -33,8 +38,10 @@ internal static class VisualStyles
         return "None";
     }
 
+    // More than just "None" means the mode has something worth showing in the style picker
     internal static bool IsSupported(string mode) => GetSupportedNames(mode).Length > 1;
 
+    // Checks a specific mode/style pairing; None is always allowed
     internal static bool IsSupported(string mode, string style)
     {
         var normalizedStyle = Resolve(style);
@@ -47,13 +54,16 @@ internal static class VisualStyles
         return false;
     }
 
+    // Order matters here: the more specific groups are checked before the broader ones
     internal static string[] GetSupportedNames(string mode)
     {
         if (string.Equals(mode, "Stereo Levels", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Stereo Spectrum", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Dynamics History", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Spectral History", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Oscilloscope", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Spectral Balance", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Advanced Spectral Balance", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Waterfall", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Octave Waterfall", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Radial Spectrum", StringComparison.OrdinalIgnoreCase) ||
@@ -79,6 +89,7 @@ internal static class VisualStyles
         return s_noStyles;
     }
 
+    // Text to enum, anything unrecognized quietly becomes None
     internal static VisualStyle Parse(string value) =>
         string.Equals(value, "Pulse", StringComparison.OrdinalIgnoreCase) ? VisualStyle.Pulse :
         string.Equals(value, "Glow", StringComparison.OrdinalIgnoreCase) ? VisualStyle.Glow :
@@ -87,6 +98,7 @@ internal static class VisualStyles
         string.Equals(value, "Precision", StringComparison.OrdinalIgnoreCase) ? VisualStyle.Precision :
         VisualStyle.None;
 
+    // Modes drawn by the advanced visualization control rather than the basic bar meters
     private static bool IsAdvancedMode(string mode) =>
         string.Equals(mode, "Waterfall", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Radial Spectrum", StringComparison.OrdinalIgnoreCase) ||
@@ -100,6 +112,8 @@ internal static class VisualStyles
         string.Equals(mode, "Stereo Levels", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Oscilloscope", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Spectral Balance", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(mode, "Advanced Spectral Balance", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Stereo Spectrum", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(mode, "Dynamics History", StringComparison.OrdinalIgnoreCase);
+        string.Equals(mode, "Dynamics History", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(mode, "Spectral History", StringComparison.OrdinalIgnoreCase);
 }

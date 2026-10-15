@@ -7,6 +7,13 @@ permalink: /documentation/
 
 Browse the published guides, examples and reference pages for **Spectrum Audio Analyzer**. Each guide has a readable web page; the Markdown sources remain available on GitHub.
 
+## Spectrum operating and engineering guides
+
+- [Application features, modes, controls, Windows requirements and reproducible build instructions]({{ '/' | relative_url }})
+- [Exact-version third-party notices, terms and provenance]({{ site.baseurl }}{% link THIRD_PARTY_NOTICES.md %})
+
+Spectrum captures the current Windows render endpoint through BASS/BassWASAPI loopback. It does not isolate a Spotify session or manufacture activity when an endpoint is silent or unavailable. Frequency spectra, PCM waveform/levels and historical display views use different measurement conventions; consult the README measurement section before interpreting them as calibrated audio meters.
+
 ## Read online
 
 <table>

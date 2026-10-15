@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -9,6 +10,7 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
+// Randomizing everything at once should still land on valid, consistent settings.
 public class CombinedRandomizationTests
 {
     [Fact]
@@ -143,9 +145,7 @@ public class CombinedRandomizationTests
 
     internal static FormAudioSpectrum CreateForm(string style = "None", string mode = "Spectrum")
     {
-        // The SDK test project's net48 output omits the legacy application's resource-reader reference.
-        // Load that existing build artifact, including its adjacent dependencies, without changing project files.
-        // VSTest may shadow-copy assemblies; standalone QA hosts have an unrelated base directory.
+        // The test project output lacks a reference the legacy app needs, so we load the built app artifact ourselves.
         DirectoryInfo directory = null;
         string configuration = null;
         foreach (var artifactDirectory in new[] { AppDomain.CurrentDomain.BaseDirectory,
@@ -208,7 +208,7 @@ public class CombinedRandomizationTests
         RunOnSta(() =>
         {
             using var form = CreateForm();
-            SetField(form, "_applyingRandomSelection", true); // Do not write user settings in tests.
+            SetField(form, "_applyingRandomSelection", true);
             var modes = GetField<ComboBox>(form, "_modeSelector");
             var styles = GetField<ComboBox>(form, "_styleSelector");
             var themes = GetField<ComboBox>(form, "_themeSelector");
@@ -261,7 +261,7 @@ public class CombinedRandomizationTests
             var stale = new byte[83];
             for (var i = 0; i < stale.Length; i++) stale[i] = 220;
             advanced.SetSpectrum(stale);
-            SetField(form, "_applyingRandomSelection", true); // Exercise manual controls without writing user preferences.
+            SetField(form, "_applyingRandomSelection", true);
             var selector = GetField<ComboBox>(form, "_modeSelector");
             selector.SelectedItem = mode;
             Assert.Equal((byte)42, GetField<byte[]>(advanced, "_spectrum")[0]);

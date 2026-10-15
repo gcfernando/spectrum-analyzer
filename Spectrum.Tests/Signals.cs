@@ -1,14 +1,15 @@
+// Developer :: > Gehan Fernando
 using System;
 using Spectrum.Dsp;
 
 namespace Spectrum.Tests;
 
-/// <summary>Deterministic test-signal generation and analysis helpers.</summary>
+// Deterministic signal generators and analysis helpers shared by the audio tests.
 internal static class Signals
 {
     public const int Fs48k = 48000;
 
-    /// <summary>Interleaved buffer of <paramref name="frames"/> frames.</summary>
+    // Interleaved buffer of the requested number of frames.
     public static float[] Interleaved(int frames, int channels, Func<int, long, double> gen)
     {
         var buffer = new float[frames * channels];
@@ -32,14 +33,14 @@ internal static class Signals
     public static float[] MonoSine(int frames, int fs, double hz, double amp)
         => Interleaved(frames, 1, (_, n) => Sine(hz, amp, n, fs));
 
-    /// <summary>Gaussian white noise with standard deviation <paramref name="sigma"/>.</summary>
+    // White noise with a Gaussian distribution, sigma picks the spread.
     public static double[] WhiteNoise(int length, double sigma, int seed)
     {
         var rng = new Random(seed);
         var x = new double[length];
         for (var i = 0; i < length; i += 2)
         {
-            // Box–Muller.
+            // Gaussian samples come from the Box-Muller transform.
             var u1 = 1.0 - rng.NextDouble();
             var u2 = rng.NextDouble();
             var r = Math.Sqrt(-2.0 * Math.Log(u1)) * sigma;
@@ -53,7 +54,7 @@ internal static class Signals
         return x;
     }
 
-    /// <summary>Pink noise via Paul Kellet's refined filter.</summary>
+    // Pink noise using Paul Kellet's refined filter.
     public static double[] PinkNoise(int length, int seed)
     {
         var white = WhiteNoise(length, 1.0, seed);
@@ -78,7 +79,7 @@ internal static class Signals
     public static float[] ToInterleaved(double[] mono, int start, int frames, int channels)
         => Interleaved(frames, channels, (_, n) => mono[start + n]);
 
-    /// <summary>Analyzes a RequiredFrames buffer and returns band levels in dB.</summary>
+    // Runs a RequiredFrames-sized buffer through the engine and hands back the band levels in dB.
     public static double[] AnalyzeDb(BandSpectrumAnalyzer engine, float[] interleaved)
     {
         var power = new double[engine.Plan.Count];
@@ -124,12 +125,12 @@ internal static class Signals
         return LevelScale.PowerToDb(sum);
     }
 
-    /// <summary>Resolution-limited band: window too short for MinBinsPerBand bins.</summary>
+    // A band is resolution-limited when the window is too short to fit MinBinsPerBand bins.
     public static bool IsResolved(BandDiagnostic d) => d.WidthHz() / d.ResolutionHz >= BandSpectrumAnalyzer.MinBinsPerBand;
 
     public static double WidthHz(this BandDiagnostic d) => d.UpperHz - d.LowerHz;
 
-    /// <summary>Approximate independent noise estimates per frame.</summary>
+    // Rough count of independent noise estimates per frame.
     public static double DegreesOfFreedom(BandDiagnostic d) => Math.Max(1.0, d.WidthHz() / d.ResolutionHz / 1.5);
 
     public static BandSpectrumAnalyzer DefaultEngine(int fs = Fs48k, int channels = 2)

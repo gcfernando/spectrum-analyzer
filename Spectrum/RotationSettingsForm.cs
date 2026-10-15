@@ -1,9 +1,11 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Drawing;
 using System.Windows.Forms;
 
 namespace Spectrum;
 
+// Small dialog for choosing fixed vs timed-random visual rotation
 internal sealed class RotationSettingsForm : Form
 {
     private readonly RadioButton _fixedOption;
@@ -12,15 +14,19 @@ internal sealed class RotationSettingsForm : Form
     private readonly Font _formFont = new("Segoe UI", 9f);
     private readonly Font _headingFont;
 
+    // Built in code (no designer) and colored from the current theme so it matches the main window
     public RotationSettingsForm(bool randomEnabled, int intervalMinutes, BarColorTheme theme)
     {
         var ui = theme.Ui;
+        // Fixed-size modal dialog, centered over the parent and kept out of the taskbar
         Text = "Mode, Style and Theme Rotation";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
+        AutoScaleDimensions = new SizeF(7f, 15f);
+        AutoScaleMode = AutoScaleMode.Font;
         ClientSize = new Size(380, 246);
         BackColor = ui.Surface;
         ForeColor = ui.PrimaryText;
@@ -46,6 +52,7 @@ internal sealed class RotationSettingsForm : Form
             ForeColor = ui.SecondaryText
         };
 
+        // Thin accent line under the header
         var accent = new Panel
         {
             BackColor = ui.Focus,
@@ -56,7 +63,10 @@ internal sealed class RotationSettingsForm : Form
         _fixedOption = new RadioButton
         {
             AutoSize = true,
-            Text = "Fixed",
+            Text = "&Fixed",
+            Name = "fixedOption",
+            AccessibleName = "Fixed visual selection",
+            TabIndex = 0,
             ForeColor = ui.PrimaryText,
             Location = new Point(22, 87),
             Checked = !randomEnabled
@@ -74,7 +84,10 @@ internal sealed class RotationSettingsForm : Form
         _randomOption = new RadioButton
         {
             AutoSize = true,
-            Text = "Timed random",
+            Text = "Timed &random",
+            Name = "randomOption",
+            AccessibleName = "Timed random visual selection",
+            TabIndex = 1,
             ForeColor = ui.PrimaryText,
             Location = new Point(22, 132),
             Checked = randomEnabled
@@ -92,15 +105,21 @@ internal sealed class RotationSettingsForm : Form
         var intervalLabel = new Label
         {
             AutoSize = true,
-            Text = "Change every",
+            Text = "Change &every",
+            TabIndex = 2,
             Location = new Point(45, 184),
             ForeColor = ui.SecondaryText
         };
 
         _interval = new NumericUpDown
         {
+            Name = "rotationInterval",
+            AccessibleName = "Rotation interval in minutes",
+            AccessibleDescription = "Time between random visual selections, from 1 to 240 minutes.",
+            TabIndex = 3,
             Minimum = 1,
             Maximum = 240,
+            // Clamp in case a saved value is outside the allowed range, NumericUpDown would throw
             Value = Math.Max(1, Math.Min(240, intervalMinutes)),
             Location = new Point(132, 180),
             Size = new Size(62, 25),
@@ -126,7 +145,11 @@ internal sealed class RotationSettingsForm : Form
             BackColor = ui.ControlSurface,
             ForeColor = ui.PrimaryText
         };
+        // Flat buttons need their hover/pressed colors set by hand to follow the theme
         cancelButton.FlatAppearance.BorderColor = ui.Divider;
+        cancelButton.FlatAppearance.MouseOverBackColor = ui.Hover;
+        cancelButton.FlatAppearance.MouseDownBackColor = ui.Selection;
+        cancelButton.TabIndex = 5;
 
         var applyButton = new Button
         {
@@ -139,6 +162,9 @@ internal sealed class RotationSettingsForm : Form
             ForeColor = ui.PrimaryText
         };
         applyButton.FlatAppearance.BorderColor = ui.Focus;
+        applyButton.FlatAppearance.MouseOverBackColor = ui.Hover;
+        applyButton.FlatAppearance.MouseDownBackColor = ui.Selection;
+        applyButton.TabIndex = 4;
 
         Controls.AddRange(new Control[]
         {
@@ -147,16 +173,19 @@ internal sealed class RotationSettingsForm : Form
             minutesLabel, cancelButton, applyButton
         });
 
+        // Enter applies, Esc cancels; interval is only editable while random mode is on
         AcceptButton = applyButton;
         CancelButton = cancelButton;
         _interval.Enabled = randomEnabled;
         _randomOption.CheckedChanged += (sender, args) => _interval.Enabled = _randomOption.Checked;
     }
 
+    // What the caller reads after the dialog returns OK
     public bool RandomEnabled => _randomOption.Checked;
 
     public int IntervalMinutes => (int)_interval.Value;
 
+    // Fonts are created by us, so we have to dispose them ourselves
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);

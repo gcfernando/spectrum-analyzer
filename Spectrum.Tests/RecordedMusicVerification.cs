@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.IO;
 using System.Reflection;
@@ -7,7 +8,7 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
-/// <summary>Explicit local verification helper; requires an authorized MP3 path and the existing native BASS library.</summary>
+// Manual helper for checking against a real MP3 locally - needs a path you're allowed to use plus the native BASS library.
 public static class RecordedMusicVerification
 {
     public static string Verify(string path)

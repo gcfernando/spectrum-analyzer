@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Diagnostics;
 using System.Drawing;
@@ -6,8 +7,10 @@ using System.Windows.Forms;
 
 namespace Spectrum;
 
+// Smooth line-style spectrum: eases each band toward its target level on a ~60fps timer
 internal sealed class WaveSpectrumControl : Control
 {
+    // _targets are the latest incoming values, _levels are what's actually drawn (eased toward targets)
     private readonly byte[] _targets;
     private readonly float[] _levels;
     private readonly PointF[] _points;
@@ -15,15 +18,21 @@ internal sealed class WaveSpectrumControl : Control
     private readonly Timer _timer;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private long _lastTickTimestamp;
+    private long _lastSpectrumTimestamp;
+    // If no new frame arrives within this long, we treat the audio as gone and let the wave fall
+    internal const int StaleFrameMilliseconds = 500;
     private Color _lowColor = Color.LimeGreen;
     private Color _midColor = Color.Gold;
     private Color _highColor = Color.Orange;
     private Color _peakColor = Color.Red;
     private VisualStyle _style;
+    // Previous frame's line, drawn faintly for the Trail style
     private bool _hasTrail;
 
+    // Timer stays stopped until audio shows up, no point ticking an idle control
     internal WaveSpectrumControl(int bandCount)
     {
+        if (bandCount < 0) throw new ArgumentOutOfRangeException(nameof(bandCount));
         _targets = new byte[bandCount];
         _levels = new float[bandCount];
         _points = new PointF[bandCount];
@@ -36,12 +45,14 @@ internal sealed class WaveSpectrumControl : Control
         BackColor = Color.FromArgb(50, 50, 50);
     }
 
+    // New data just sets targets and wakes the animation timer; drawing happens on the tick
     internal void SetSpectrum(byte[] values)
     {
         var count = Math.Min(values?.Length ?? 0, _targets.Length);
         if (count > 0)
             Buffer.BlockCopy(values, 0, _targets, 0, count);
         Array.Clear(_targets, count, _targets.Length - count);
+        _lastSpectrumTimestamp = _clock.ElapsedTicks;
 
         if (!_timer.Enabled)
         {
@@ -50,6 +61,7 @@ internal sealed class WaveSpectrumControl : Control
         }
     }
 
+    // Lets tests set the drawn levels directly and freezes the animation
     internal void SetDisplayedLevelsForTesting(float[] levels)
     {
         var count = Math.Min(levels?.Length ?? 0, _levels.Length);
@@ -60,16 +72,17 @@ internal sealed class WaveSpectrumControl : Control
         Invalidate();
     }
 
+    // Jump straight to the new values with no easing, e.g. after a mode switch, and drop the old trail
     internal void SynchronizeSpectrum(byte[] values)
     {
         SetSpectrum(values);
         for (var i = 0; i < _levels.Length; i++)
             _levels[i] = _targets[i];
         _hasTrail = false;
-        _timer.Stop();
         Invalidate();
     }
 
+    // Pulls the four gradient colors and background from the theme
     internal void SetTheme(BarColorTheme theme)
     {
         _lowColor = theme.Low;
@@ -80,6 +93,7 @@ internal sealed class WaveSpectrumControl : Control
         Invalidate();
     }
 
+    // Only repaint when the style actually changes
     internal VisualStyle Style
     {
         get => _style;
@@ -93,6 +107,7 @@ internal sealed class WaveSpectrumControl : Control
         }
     }
 
+    // Timer is the only disposable we own
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -100,6 +115,7 @@ internal sealed class WaveSpectrumControl : Control
         base.Dispose(disposing);
     }
 
+    // Draws a translucent fill under the curve, then the line segment by segment so each one gets its own level color
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
@@ -111,7 +127,19 @@ internal sealed class WaveSpectrumControl : Control
 
         var height = ClientSize.Height - 1f;
         PopulateFrequencyPoints(_levels, ClientSize.Width, ClientSize.Height, _points);
+        // One band can't form a line, so draw a single vertical stroke instead
+        if (_points.Length == 1)
+        {
+            if (_levels[0] > 0)
+            {
+                using var singlePen = new Pen(GetLevelColor(_levels[0] / 255f), 2f);
+                e.Graphics.DrawLine(singlePen, _points[0].X, height, _points[0].X, _points[0].Y);
+            }
+            _hasTrail = false;
+            return;
+        }
 
+        // Close the path along the bottom edge so the fill is a solid area
         using var fillPath = new GraphicsPath();
         fillPath.AddLines(_points);
         fillPath.AddLine(_points[_points.Length - 1].X, height, _points[0].X, height);
@@ -128,6 +156,7 @@ internal sealed class WaveSpectrumControl : Control
             e.Graphics.DrawLines(trailPen, _trailPoints);
         }
 
+        // Pulse brightens the line with overall loudness; scanline rides at the average level
         var pulse = _style == VisualStyle.Pulse
             ? 0.08f + (0.20f * GetAverageLevel())
             : 0f;
@@ -150,6 +179,7 @@ internal sealed class WaveSpectrumControl : Control
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round
             };
+            // Glow = wide faint stroke here, then a crisp core stroke on top below
             if (_style == VisualStyle.Glow)
                 pen.Color = Color.FromArgb(54, color);
             e.Graphics.DrawLine(pen, _points[i - 1], _points[i]);
@@ -167,25 +197,37 @@ internal sealed class WaveSpectrumControl : Control
 
         }
 
+        // Remember this frame's shape for the next trail draw
         Array.Copy(_points, _trailPoints, _points.Length);
         _hasTrail = GetAverageLevel() > 0f;
     }
 
+    // Animation step: advances levels by real elapsed time, and if the feed went stale it zeroes targets mid-step
     private void Timer_Tick(object sender, EventArgs e)
     {
         var now = _clock.ElapsedTicks;
-        var elapsedSeconds = Math.Min(0.2f, Math.Max(0.001f,
-            (float)(now - _lastTickTimestamp) / Stopwatch.Frequency));
+        var elapsedSeconds = Math.Max(0f, (float)(now - _lastTickTimestamp) / Stopwatch.Frequency);
+        var deadline = _lastSpectrumTimestamp + Stopwatch.Frequency * StaleFrameMilliseconds / 1000;
+        // Split the elapsed time at the stale deadline: normal movement before it, decay toward zero after
+        if (now >= deadline)
+        {
+            var activeSeconds = Math.Max(0f, (float)(deadline - _lastTickTimestamp) / Stopwatch.Frequency);
+            activeSeconds = Math.Min(elapsedSeconds, activeSeconds);
+            StepLevels(activeSeconds);
+            Array.Clear(_targets, 0, _targets.Length);
+            elapsedSeconds -= activeSeconds;
+        }
         _lastTickTimestamp = now;
 
+        StepLevels(elapsedSeconds);
         var moving = false;
         for (var i = 0; i < _levels.Length; i++)
         {
-            _levels[i] = BarBallistics.StepLevel(_levels[i], _targets[i], elapsedSeconds, 255, 110, 440, false);
-            if (Math.Abs(_levels[i] - _targets[i]) > 0.06f)
+            if (_levels[i] != _targets[i] || _targets[i] != 0)
                 moving = true;
         }
 
+        // Everything settled at silence: stop the timer so we idle for free
         if (!moving && GetAverageLevel() <= 0f)
             _hasTrail = false;
 
@@ -194,6 +236,14 @@ internal sealed class WaveSpectrumControl : Control
             _timer.Stop();
     }
 
+    // Shared ballistics with the bar meters: fast attack, slower release
+    private void StepLevels(float elapsedSeconds)
+    {
+        for (var i = 0; i < _levels.Length; i++)
+            _levels[i] = BarBallistics.StepLevel(_levels[i], _targets[i], elapsedSeconds, 255, 110, 440, false);
+    }
+
+    // Three-segment gradient; the breakpoints (55%, 85%) keep loud peaks from washing out the mid colors
     private Color GetLevelColor(float level)
     {
         level = Math.Max(0f, Math.Min(1f, level));
@@ -204,6 +254,7 @@ internal sealed class WaveSpectrumControl : Control
         return Lerp(_highColor, _peakColor, (level - 0.85f) / 0.15f);
     }
 
+    // Mean of all bands, 0..1; drives pulse, scanline and the "is it silent" check
     private float GetAverageLevel()
     {
         if (_levels.Length == 0)
@@ -216,12 +267,14 @@ internal sealed class WaveSpectrumControl : Control
         return Math.Max(0f, Math.Min(1f, total / (_levels.Length * 255f)));
     }
 
+    // Linear color blend, amount 0..1
     private static Color Lerp(Color from, Color to, float amount) => Color.FromArgb(
         (int)Math.Round(from.A + (to.A - from.A) * amount),
         (int)Math.Round(from.R + (to.R - from.R) * amount),
         (int)Math.Round(from.G + (to.G - from.G) * amount),
         (int)Math.Round(from.B + (to.B - from.B) * amount));
 
+    // Spreads bands evenly across the width; Y is flipped since 0 is the top in GDI+
     internal static void PopulateFrequencyPoints(float[] levels, int width, int height, PointF[] points)
     {
         var drawableWidth = width - 1f;

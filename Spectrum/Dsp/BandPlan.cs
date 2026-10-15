@@ -1,9 +1,9 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Collections.Generic;
 
 namespace Spectrum.Dsp;
 
-/// <summary>A display band spanning [LowerHz, UpperHz) with a geometric centre.</summary>
 internal readonly struct FrequencyBand
 {
     public FrequencyBand(double lowerHz, double centerHz, double upperHz)
@@ -19,7 +19,6 @@ internal readonly struct FrequencyBand
     public double WidthHz => UpperHz - LowerHz;
 }
 
-/// <summary>Partitions the audio range into logarithmic bands with shared edges, capped at Nyquist.</summary>
 internal sealed class BandPlan
 {
     private readonly FrequencyBand[] _bands;
@@ -40,6 +39,7 @@ internal sealed class BandPlan
 
     public FrequencyBand this[int index] => _bands[index];
 
+    // Log spacing matches how we hear pitch, so low bands aren't squashed into one bar.
     public static BandPlan CreateLogarithmic(int count, double firstCenterHz, double lastCenterHz, int sampleRate)
     {
         if (count < 2)
@@ -62,7 +62,6 @@ internal sealed class BandPlan
 
         if (lastCenterHz * Math.Sqrt(ratio) > nyquist)
         {
-            // Lower the top centre so the final band edge lands exactly on Nyquist.
             var top = Math.Exp(((2.0 * (count - 1) * Math.Log(nyquist)) + Math.Log(firstCenterHz)) / ((2.0 * count) - 1));
             if (!(top > firstCenterHz))
             {
@@ -81,13 +80,30 @@ internal sealed class BandPlan
             var center = firstCenterHz * Math.Pow(ratio, i);
             var upper = i == count - 1 ? Math.Min(center * halfStep, nyquist) : center * halfStep;
             bands[i] = new FrequencyBand(lower, center, upper);
-            lower = upper; // Reuse the edge so adjacent bands have no gaps or overlap.
+            lower = upper;
         }
 
         return new BandPlan(bands, ratio, sampleRate);
     }
 
-    /// <summary>Maps a frequency to continuous band-index position for consistent labels and bars.</summary>
+    public static BandPlan CreateFromEdges(double[] edgesHz, int sampleRate)
+    {
+        if (edgesHz == null) throw new ArgumentNullException(nameof(edgesHz));
+        if (edgesHz.Length < 2) throw new ArgumentException("At least two edges are required.", nameof(edgesHz));
+        if (sampleRate <= 0) throw new ArgumentOutOfRangeException(nameof(sampleRate), sampleRate, "Sample rate must be positive.");
+        if (!(edgesHz[0] > 0)) throw new ArgumentException("Edges must be positive.", nameof(edgesHz));
+        for (var i = 1; i < edgesHz.Length; i++)
+            if (!(edgesHz[i] > edgesHz[i - 1])) throw new ArgumentException("Edges must be strictly ascending.", nameof(edgesHz));
+        if (edgesHz[edgesHz.Length - 1] > sampleRate / 2.0)
+            throw new ArgumentException("The top edge exceeds Nyquist.", nameof(edgesHz));
+
+        var bands = new FrequencyBand[edgesHz.Length - 1];
+        for (var i = 0; i < bands.Length; i++)
+            bands[i] = new FrequencyBand(edgesHz[i], Math.Sqrt(edgesHz[i] * edgesHz[i + 1]), edgesHz[i + 1]);
+        var ratio = Math.Pow(edgesHz[edgesHz.Length - 1] / edgesHz[0], 1.0 / bands.Length);
+        return new BandPlan(bands, ratio, sampleRate);
+    }
+
     public double FrequencyToPosition(double hz)
     {
         if (!(hz > 0))

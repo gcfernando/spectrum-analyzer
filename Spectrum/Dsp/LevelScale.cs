@@ -1,21 +1,26 @@
+// Developer :: > Gehan Fernando
 using System;
 
 namespace Spectrum.Dsp;
 
-/// <summary>Converts band power relative to a full-scale sine into the fixed −72 to 0 dBFS display range.</summary>
+// Helpers for turning raw power into dB and then into a 0-255 value for the display
 internal static class LevelScale
 {
+    // 0 dB is full scale, anything above just clamps to the top
     public const double CeilingDb = 0.0;
+    // Below -72 dB we treat the bar as empty, nobody can see it anyway
     public const double FloorDb = -72.0;
 
-    /// <summary>Power treated as digital silence to avoid taking log10 of zero.</summary>
+    // Smallest power we bother taking a log of, avoids -inf
     public const double MinPower = 1e-30;
 
+    // Sentinel for "nothing there" (silence or bad input)
     public const double SilenceDb = -300.0;
 
+    // Power ratio to dB; the guards keep NaN, zero and infinity from blowing up the log
     public static double PowerToDb(double relativePower)
     {
-        // Treat NaN, non-positive, and near-zero power as silence.
+        // Written as !(x > min) on purpose so NaN also lands here
         if (!(relativePower > MinPower))
         {
             return SilenceDb;
@@ -29,7 +34,7 @@ internal static class LevelScale
         return 10.0 * Math.Log10(relativePower);
     }
 
-    /// <summary>Returns a finite normalized height in [0, 1].</summary>
+    // Map dB between floor and ceiling onto 0..1, clamped
     public static double Normalize(double levelDb)
     {
         if (double.IsNaN(levelDb))
@@ -41,12 +46,13 @@ internal static class LevelScale
         return n <= 0.0 ? 0.0 : (n >= 1.0 ? 1.0 : n);
     }
 
-    /// <summary>Quantizes normalized height to the published spectrum's 0–255 byte range.</summary>
+    // Quantize to a byte so the UI can store levels compactly
     public static byte ToDisplayByte(double levelDb) => (byte)Math.Round(Normalize(levelDb) * 255.0);
 
-    /// <summary>Converts a published display level back to its quantized relative-power estimate.</summary>
+    // Reverse of the byte quantization, so we can get back an approximate power from a stored level
     public static double DisplayByteToRelativePower(byte displayLevel)
     {
+        // 0 means silent, skip the pow so we return a true zero
         if (displayLevel == 0)
         {
             return 0.0;

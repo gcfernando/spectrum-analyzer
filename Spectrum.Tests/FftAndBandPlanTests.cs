@@ -1,12 +1,14 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Linq;
 using Spectrum.Dsp;
 using Xunit;
 
-[assembly: CollectionBehavior(DisableTestParallelization = true)] // Keep timing/allocations stable.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace Spectrum.Tests;
 
+// FFT sanity: transforms of known signals land where the maths says they should.
 public class RadixTwoFftTests
 {
     [Theory]
@@ -33,7 +35,6 @@ public class RadixTwoFftTests
                 si += (re[t] * Math.Sin(a)) + (im[t] * Math.Cos(a));
             }
 
-            // Round-off accumulates in O(n) steps relative to ~sqrt(n) magnitude.
             Assert.InRange(fre[k] - sr, -1e-9 * n, 1e-9 * n);
             Assert.InRange(fim[k] - si, -1e-9 * n, 1e-9 * n);
         }
@@ -41,7 +42,7 @@ public class RadixTwoFftTests
 
     [Theory]
     [InlineData(32768)]
-    [InlineData(65536)] // 96 kHz production max; window is zero-padded x2
+    [InlineData(65536)]
     public void SatisfiesParsevalAtProductionSizes(int n)
     {
         var rng = new Random(n);
@@ -63,7 +64,6 @@ public class RadixTwoFftTests
     [Fact]
     public void BinFrequencyMapping_IsKTimesFsOverN()
     {
-        // A pure bin tone stays in its bin: f = k·fs/N.
         const int n = 4096;
         const int k = 341;
         var re = new double[n];
@@ -87,6 +87,7 @@ public class RadixTwoFftTests
     public void RejectsNonPowerOfTwo(int n) => Assert.Throws<ArgumentOutOfRangeException>(() => new RadixTwoFft(n));
 }
 
+// Band plan layout: centres, edges and window lengths across the sample rates we support.
 public class BandPlanTests
 {
     [Theory]
@@ -107,11 +108,11 @@ public class BandPlanTests
             var b = plan[i];
             Assert.True(b.LowerHz > 0);
             Assert.True(b.LowerHz < b.CenterHz && b.CenterHz < b.UpperHz, $"band {i} not ordered");
-            Assert.Equal(Math.Sqrt(b.LowerHz * b.UpperHz), b.CenterHz, 6); // geometric centre
+            Assert.Equal(Math.Sqrt(b.LowerHz * b.UpperHz), b.CenterHz, 6);
             Assert.True(b.UpperHz <= fs / 2.0);
             if (i > 0)
             {
-                Assert.Equal(plan[i - 1].UpperHz, b.LowerHz); // shared edge: no gap, no overlap
+                Assert.Equal(plan[i - 1].UpperHz, b.LowerHz);
                 Assert.Equal(plan.BandRatio, b.CenterHz / plan[i - 1].CenterHz, 9);
             }
         }
@@ -124,7 +125,6 @@ public class BandPlanTests
         }
         else
         {
-            // Too few bands to keep 20 kHz below Nyquist; plan ends at Nyquist.
             Assert.InRange(plan.MaxHz / (fs / 2.0), 1 - 1e-9, 1.0);
         }
     }
@@ -139,7 +139,7 @@ public class BandPlanTests
 
         Assert.Equal(83, plan.Count);
         Assert.True(plan.MaxHz <= fs / 2.0, $"top edge {plan.MaxHz} above Nyquist {fs / 2}");
-        Assert.InRange(plan.MaxHz / (fs / 2.0), 1 - 1e-9, 1.0); // uses the available bandwidth exactly
+        Assert.InRange(plan.MaxHz / (fs / 2.0), 1 - 1e-9, 1.0);
         Assert.Equal(20.0, plan[0].CenterHz, 9);
     }
 
@@ -167,7 +167,6 @@ public class BandPlanTests
         {
             var d = engine.GetDiagnostic(b);
 
-            // Bin weights cover the band exactly once.
             Assert.Equal(d.UpperHz - d.LowerHz, d.Weights.Sum() * d.BinWidthHz, 6);
             Assert.All(d.Weights, w => Assert.InRange(w, 0.0, 1.0));
             Assert.True(d.FirstBin >= 1, "DC bin must never contribute");
@@ -185,7 +184,7 @@ public class BandPlanTests
     {
         var lengths = BandSpectrumAnalyzer.DefaultWindowLengths(fs);
         Assert.Equal(new[] { shortest, shortest * 2, shortest * 4 }, lengths);
-        Assert.InRange(lengths[0] / (double)fs, 0.080, 0.095); // ~85 ms shortest window at every rate
+        Assert.InRange(lengths[0] / (double)fs, 0.080, 0.095);
     }
 
     [Fact]
@@ -200,12 +199,10 @@ public class BandPlanTests
                 Assert.True(Signals.IsResolved(d), $"band {b}: {d.WidthHz() / d.ResolutionHz:F2} bins at N={d.WindowLength}");
             }
 
-            // Zero-padding only when a band would otherwise have <1 bin.
             Assert.True(d.BinWidthHz <= d.WidthHz() || d.FftLength == d.WindowLength * BandSpectrumAnalyzer.MaxZeroPadding, $"band {b}");
 
             if (b > 0)
             {
-                // Resolution only gets coarser at higher frequencies.
                 Assert.True(d.WindowLength <= engine.GetWindowLength(b - 1));
             }
         }

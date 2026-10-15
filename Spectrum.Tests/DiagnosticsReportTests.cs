@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Globalization;
 using System.Linq;
@@ -8,7 +9,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
-/// <summary>Dead-band diagnostics for each band and its centre-tone response.</summary>
+// Dead-band diagnostics: each band reports properly and responds to its own centre tone.
 public class DiagnosticsReportTests
 {
     private readonly ITestOutputHelper _out;

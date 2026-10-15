@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -5,7 +6,7 @@ using System.Windows.Forms;
 
 namespace Spectrum;
 
-/// <summary>Draws a bounded, deterministic particle field from copied display-level frames.</summary>
+// Subtle background layer: little glowing dots spawn per frequency band and fade out
 internal sealed class AmbientParticleFieldControl : Control
 {
     internal const int BandCount = 83;
@@ -14,7 +15,9 @@ internal sealed class AmbientParticleFieldControl : Control
     private const byte ParticleLifetime = 36;
 
     private readonly byte[] _displayFrame = new byte[BandCount];
+    // Fixed-size ring buffer of particles, so no allocations while animating
     private readonly Particle[] _particles = new Particle[MaximumParticles];
+    // One brush reused for every dot, only its color changes per draw
     private readonly SolidBrush _particleBrush = new SolidBrush(Color.White);
     private int _nextParticle;
     private int _activeParticleCount;
@@ -22,6 +25,7 @@ internal sealed class AmbientParticleFieldControl : Control
     private bool _disposed;
     private BarColorTheme _theme = BarColorThemes.Resolve("ClassicSmooth");
 
+    // Custom painted + double buffered to avoid flicker since we redraw every frame
     internal AmbientParticleFieldControl()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
@@ -29,17 +33,19 @@ internal sealed class AmbientParticleFieldControl : Control
         BackColor = Color.FromArgb(38, 35, 29);
     }
 
+    // Test hooks so unit tests can peek at internal state
     internal int ActiveParticleCount => _activeParticleCount;
 
     internal bool IsDisposedForTesting => _disposed;
 
+    // Swap the palette used to tint particles by level
     internal void SetTheme(BarColorTheme theme)
     {
         _theme = theme;
         Invalidate();
     }
 
-    /// <summary>Copies one UI-thread display frame; it never retains the caller's buffer.</summary>
+    // Called per audio frame: ages existing particles, then maybe spawns new ones per band
     internal void SetSpectrum(byte[] values)
     {
         if (values == null)
@@ -47,6 +53,7 @@ internal sealed class AmbientParticleFieldControl : Control
         if (_disposed)
             return;
 
+        // Copy what we got and zero the rest so a short array never leaves stale bands behind
         var count = Math.Min(values.Length, BandCount);
         Buffer.BlockCopy(values, 0, _displayFrame, 0, count);
         Array.Clear(_displayFrame, count, BandCount - count);
@@ -61,6 +68,7 @@ internal sealed class AmbientParticleFieldControl : Control
             }
         }
 
+        // Pure silence: wipe everything immediately instead of letting dots linger
         if (!hasActiveLevel)
         {
             Array.Clear(_particles, 0, _particles.Length);
@@ -82,6 +90,7 @@ internal sealed class AmbientParticleFieldControl : Control
         Invalidate();
     }
 
+    // Cheap fingerprint of particle state so tests can check determinism
     internal int GetParticleStateHashForTesting()
     {
         var hash = 17;
@@ -95,6 +104,7 @@ internal sealed class AmbientParticleFieldControl : Control
         return hash;
     }
 
+    // Position is derived from the seed, so each particle stays put while it fades and drifts up a bit
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
@@ -102,6 +112,7 @@ internal sealed class AmbientParticleFieldControl : Control
         if (_activeParticleCount == 0 || ClientSize.Width <= 0 || ClientSize.Height <= 0)
             return;
 
+        // Restore smoothing afterwards, the graphics object isn't ours
         var previousSmoothingMode = e.Graphics.SmoothingMode;
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         try
@@ -112,6 +123,7 @@ internal sealed class AmbientParticleFieldControl : Control
                 if (particle.Age == 0)
                     continue;
 
+                // Alpha and drift both follow remaining life; louder bands make bigger dots
                 var life = particle.Age / (float)ParticleLifetime;
                 var x = ((particle.Seed & 0xffff) / 65535f) * Math.Max(0, ClientSize.Width - 1);
                 var baseY = ((particle.Seed >> 16) & 0xffff) / 65535f;
@@ -128,6 +140,7 @@ internal sealed class AmbientParticleFieldControl : Control
         }
     }
 
+    // Release the brush and drop particles; the flag guards late SetSpectrum calls
     protected override void Dispose(bool disposing)
     {
         if (disposing && !_disposed)
@@ -141,6 +154,7 @@ internal sealed class AmbientParticleFieldControl : Control
         base.Dispose(disposing);
     }
 
+    // Ticks every particle's age down and recounts which ones are still alive (Age 0 = dead slot)
     private void AgeParticles()
     {
         _activeParticleCount = 0;
@@ -153,6 +167,7 @@ internal sealed class AmbientParticleFieldControl : Control
         }
     }
 
+    // Overwrites the oldest slot in the ring, only counting it as new if that slot was free
     private void AddParticle(int band, byte level)
     {
         if (_particles[_nextParticle].Age == 0)
@@ -168,9 +183,11 @@ internal sealed class AmbientParticleFieldControl : Control
         _nextParticle = (_nextParticle + 1) % MaximumParticles;
     }
 
+    // Louder band = higher spawn chance; hash gives a repeatable "random" roll without Random state
     private static bool ShouldSpawn(int frameNumber, int band, byte level) =>
         (Hash(frameNumber, band, level) & 0xff) <= level;
 
+    // Low->mid for the quiet half, mid->high for the loud half
     private Color GetLevelColor(byte level)
     {
         var position = level / 255f;
@@ -179,6 +196,7 @@ internal sealed class AmbientParticleFieldControl : Control
         return Blend(_theme.Mid, _theme.High, (position - 0.5f) * 2f);
     }
 
+    // Integer mixing hash (xorshift-multiply style) so the same inputs always give the same scatter
     private static int Hash(int frameNumber, int band, byte level)
     {
         unchecked
@@ -192,12 +210,14 @@ internal sealed class AmbientParticleFieldControl : Control
         }
     }
 
+    // Plain linear color mix, amount is 0..1
     private static Color Blend(Color from, Color to, float amount) => Color.FromArgb(
         from.A + (int)((to.A - from.A) * amount),
         from.R + (int)((to.R - from.R) * amount),
         from.G + (int)((to.G - from.G) * amount),
         from.B + (int)((to.B - from.B) * amount));
 
+    // Seed packs x in the low 16 bits and y in the high 16 when drawing
     private struct Particle
     {
         public byte Band;

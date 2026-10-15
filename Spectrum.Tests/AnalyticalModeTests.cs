@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Diagnostics;
 using System.Drawing;
@@ -14,6 +15,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
+// Covers the analytical display mode end to end, from the data it consumes to what ends up on screen.
 public class AnalyticalModeTests
 {
     private readonly ITestOutputHelper _output;
@@ -22,15 +24,15 @@ public class AnalyticalModeTests
     private static void OnSta(Action action) => CombinedRandomizationTests.RunOnSta(action);
 
     [Fact]
-    public void RegistryContainsExactlyTheSeventeenImplementedModesAndNoRetiredViews()
+    public void RegistryContainsExactlyTheEighteenImplementedModesAndNoRetiredViews()
     {
         OnSta(() =>
         {
             using var form = CombinedRandomizationTests.CreateForm();
             var selector = Field<ComboBox>(form, "_modeSelector");
             var expected = new[] { "Spectrum", "Bricks", "LED", "Waterfall", "Radial Spectrum", "Contour", "Peak Trace",
-                "Threshold Monitor", "Band Matrix", "Octave Spectrum", "Level Change", "Octave Waterfall", "Stereo Levels", "Oscilloscope", "Spectral Balance", "Stereo Spectrum", "Dynamics History" };
-            Assert.Equal(expected.OrderBy(x => x), selector.Items.Cast<string>().OrderBy(x => x));
+                "Threshold Monitor", "Band Matrix", "Octave Spectrum", "Level Change", "Octave Waterfall", "Stereo Levels", "Oscilloscope", "Spectral Balance", "Advanced Spectral Balance", "Stereo Spectrum", "Dynamics History", "Spectral History" };
+            Assert.Equal(FormAudioSpectrum.SortModeNames(expected), selector.Items.Cast<string>().ToArray());
             foreach (var retired in new[] { "Dots", "Lollipop", "Wave", "Orbit History", "Level Change Map", "Frequency Ribbon" })
                 Assert.DoesNotContain(retired, selector.Items.Cast<string>());
             CombinedRandomizationTests.SetField(form, "_applyingRandomSelection", true);
@@ -61,7 +63,7 @@ public class AnalyticalModeTests
             control.SetSpectrum(new byte[] { 100 }, "Ice", (AdvancedVisualizationMode)value);
             Assert.Equal(target, control.Mode);
             Assert.Equal(2, Field<int>(control, "_historyCount"));
-            Assert.Throws<ArgumentOutOfRangeException>(() => control.Mode = (AdvancedVisualizationMode)18);
+            Assert.Throws<ArgumentOutOfRangeException>(() => control.Mode = (AdvancedVisualizationMode)20);
             Assert.Throws<ArgumentOutOfRangeException>(() => control.SetSpectrum(new byte[83], "Ice", (AdvancedVisualizationMode)(-1)));
         });
     }
@@ -76,6 +78,7 @@ public class AnalyticalModeTests
     [InlineData("Stereo Levels")]
     [InlineData("Oscilloscope")]
     [InlineData("Spectral Balance")]
+    [InlineData("Advanced Spectral Balance")]
     public void MeasurementViewsOfferOnlyMeaningfulReferenceStyles(string mode)
     {
         Assert.Equal(new[] { "None", "Precision" }, VisualStyles.GetSupportedNames(mode));
@@ -489,7 +492,6 @@ public class AnalyticalModeTests
         });
     }
 
-    // Actual offscreen controls with synthetic input; no image files are created.
     public static string RenderModeContactSheet(int firstRow = 0, int rowCount = 12)
     {
         string result = null;

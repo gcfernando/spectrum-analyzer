@@ -1,0 +1,7 @@
+# Keep text files consistent in Windows checkouts.
+* text=auto eol=crlf
+
+# Preserve binary libraries and image assets byte for byte.
+*.dll binary
+*.ico binary
+*.png binary

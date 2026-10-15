@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Threading;
 using Spectrum;
@@ -5,6 +6,7 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
+// Basic sanity checks for the ambient particle background so it never misbehaves on tiny or busy inputs.
 public class AmbientParticleFieldControlTests
 {
     [Fact]

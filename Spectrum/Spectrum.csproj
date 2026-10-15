@@ -39,6 +39,7 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <OutputPath>bin\Release\</OutputPath>
+    <AllowedReferenceRelatedFileExtensions>.dll.config;.pri</AllowedReferenceRelatedFileExtensions>
     <DefineConstants>TRACE</DefineConstants>
     <WarningLevel>4</WarningLevel>
     <ErrorReport>prompt</ErrorReport>
@@ -55,10 +56,6 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>Ref_Files\NAudio.dll</HintPath>
     </Reference>
-    <Reference Include="NAudio.WindowsMediaFormat, Version=1.0.1.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>Ref_Files\NAudio.WindowsMediaFormat.dll</HintPath>
-    </Reference>
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="WindowsBase" />
@@ -68,9 +65,6 @@
     <Reference Include="System.Core" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Configuration" />
-    <Reference Include="System.Configuration.ConfigurationManager, Version=10.0.0.1, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>..\packages\System.Configuration.ConfigurationManager.10.0.1\lib\net462\System.Configuration.ConfigurationManager.dll</HintPath>
-    </Reference>
     <Reference Include="System.Buffers, Version=4.0.3.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>..\packages\System.Buffers.4.5.0\lib\netstandard2.0\System.Buffers.dll</HintPath>
       <Private>True</Private>
@@ -115,6 +109,7 @@
     <Compile Include="Dsp\LevelScale.cs" />
     <Compile Include="Dsp\RadixTwoFft.cs" />
     <Compile Include="Dsp\SampleHistory.cs" />
+    <Compile Include="Dsp\SevenBandAnalyzer.cs" />
     <Compile Include="Device.cs" />
     <Compile Include="AdvancedVisualizationControl.cs">
       <SubType>Component</SubType>
@@ -166,6 +161,29 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="..\THIRD_PARTY_NOTICES.md" Condition="'$(Configuration)' != 'Release'">
+      <Link>THIRD_PARTY_NOTICES.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <SpectrumPackageNotice Include="..\packages\System.Buffers.4.5.0\THIRD-PARTY-NOTICES.TXT">
+      <Link>ThirdParty\System.Buffers\THIRD-PARTY-NOTICES.TXT</Link>
+    </SpectrumPackageNotice>
+    <SpectrumPackageNotice Include="..\packages\System.Memory.4.5.3\THIRD-PARTY-NOTICES.TXT">
+      <Link>ThirdParty\System.Memory\THIRD-PARTY-NOTICES.TXT</Link>
+    </SpectrumPackageNotice>
+    <SpectrumPackageNotice Include="..\packages\System.Numerics.Vectors.4.5.0\THIRD-PARTY-NOTICES.TXT">
+      <Link>ThirdParty\System.Numerics.Vectors\THIRD-PARTY-NOTICES.TXT</Link>
+    </SpectrumPackageNotice>
+    <SpectrumPackageNotice Include="..\packages\System.Resources.Extensions.4.6.0\THIRD-PARTY-NOTICES.TXT">
+      <Link>ThirdParty\System.Resources.Extensions\THIRD-PARTY-NOTICES.TXT</Link>
+    </SpectrumPackageNotice>
+    <SpectrumPackageNotice Include="..\packages\System.Runtime.CompilerServices.Unsafe.4.5.2\THIRD-PARTY-NOTICES.TXT">
+      <Link>ThirdParty\System.Runtime.CompilerServices.Unsafe\THIRD-PARTY-NOTICES.TXT</Link>
+    </SpectrumPackageNotice>
+    <Content Include="@(SpectrumPackageNotice)" Condition="'$(Configuration)' != 'Release'">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <SpectrumRetiredReleaseFile Include="NAudio.WindowsMediaFormat.dll;System.Configuration.ConfigurationManager.dll;System.Configuration.ConfigurationManager.xml;ThirdParty\System.Configuration.ConfigurationManager\THIRD-PARTY-NOTICES.TXT" />
     <Content Include="Ref_Files\bass.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>bass.dll</Link>
@@ -176,9 +194,81 @@
     </Content>
     <Content Include="Ref_Files\Bass.Net.dll" />
     <Content Include="Ref_Files\NAudio.dll" />
-    <Content Include="Ref_Files\NAudio.WindowsMediaFormat.dll" />
     <Content Include="Ref_Files\Speaker.png" />
     <Content Include="Ref_Files\Spectrum.ico" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <UsingTask TaskName="PrepareSpectrumRelease" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <OutputDirectory ParameterType="System.String" Required="true" />
+      <OverviewFile ParameterType="System.String" Required="true" />
+      <PackageNotices ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <RetiredFiles ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        var output = Path.GetFullPath(OutputDirectory);
+        var encoding = new UTF8Encoding(false);
+        using (var combined = new MemoryStream())
+        {
+            var overview = File.ReadAllBytes(OverviewFile);
+            combined.Write(overview, 0, overview.Length);
+            foreach (var notice in PackageNotices)
+            {
+                var source = notice.GetMetadata("FullPath");
+                var package = new DirectoryInfo(Path.GetDirectoryName(source)).Name;
+                var separator = encoding.GetBytes(
+                    "\r\n\r\n---\r\n\r\n## Bundled package aggregate: " + package + "\r\n\r\n");
+                combined.Write(separator, 0, separator.Length);
+                var payload = File.ReadAllBytes(source);
+                combined.Write(payload, 0, payload.Length);
+            }
+            File.WriteAllBytes(Path.Combine(output, "THIRD_PARTY_NOTICES.md"), combined.ToArray());
+        }
+
+        // Only retire the exact documentation artifacts previously owned by this project.
+        foreach (var notice in PackageNotices)
+        {
+            var relative = notice.GetMetadata("Link");
+            var legacy = Path.GetFullPath(Path.Combine(output, relative));
+            if (!legacy.StartsWith(output.TrimEnd(Path.DirectorySeparatorChar) +
+                Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("A legacy notice must remain inside the output directory.");
+            var packageDirectory = Path.GetDirectoryName(legacy);
+            var assemblyName = new DirectoryInfo(packageDirectory).Name;
+            File.Delete(Path.Combine(output, assemblyName + ".xml"));
+            if (File.Exists(legacy))
+                File.Delete(legacy);
+            if (Directory.Exists(packageDirectory) && Directory.GetFileSystemEntries(packageDirectory).Length == 0)
+                Directory.Delete(packageDirectory);
+        }
+        foreach (var retired in RetiredFiles)
+        {
+            var legacy = Path.GetFullPath(Path.Combine(output, retired.ItemSpec));
+            if (!legacy.StartsWith(output.TrimEnd(Path.DirectorySeparatorChar) +
+                Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("A retired file must remain inside the output directory.");
+            if (File.Exists(legacy))
+                File.Delete(legacy);
+        }
+        var retiredPackage = Path.Combine(output, "ThirdParty", "System.Configuration.ConfigurationManager");
+        if (Directory.Exists(retiredPackage) && Directory.GetFileSystemEntries(retiredPackage).Length == 0)
+            Directory.Delete(retiredPackage);
+        var thirdParty = Path.Combine(output, "ThirdParty");
+        if (Directory.Exists(thirdParty) && Directory.GetFileSystemEntries(thirdParty).Length == 0)
+            Directory.Delete(thirdParty);
+      ]]></Code>
+    </Task>
+  </UsingTask>
+  <Target Name="PrepareReleaseDistribution" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release'">
+    <PrepareSpectrumRelease OutputDirectory="$(TargetDir)"
+                            OverviewFile="$(MSBuildProjectDirectory)\..\THIRD_PARTY_NOTICES.md"
+                            PackageNotices="@(SpectrumPackageNotice)"
+                            RetiredFiles="@(SpectrumRetiredReleaseFile)" />
+  </Target>
 </Project>

@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -7,7 +8,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
-/// <summary>Ballistics depend on elapsed time, not refresh rate.</summary>
+// Ballistics follow elapsed time, so the refresh rate shouldn't change the result.
 public class BarBallisticsTests
 {
     private static readonly int[] Rates = { 30, 60, 120, 144 };
@@ -25,7 +26,7 @@ public class BarBallisticsTests
                 t += 1.0 / fps;
             }
 
-            // After t ≈ τ, the bar is at 255·e^(−t/τ) regardless of frame rate.
+            // After about one time constant the bar sits at 255*e^(-t/tau), whatever the frame rate.
             Assert.InRange(v, (255 * Math.Exp(-t / 0.28)) - 0.01, (255 * Math.Exp(-t / 0.28)) + 0.01);
         }
     }
@@ -44,7 +45,7 @@ public class BarBallisticsTests
             }
 
             var seconds = frames / (double)fps;
-            Assert.InRange(seconds, 0.110 - 1e-6, 0.110 + (1.0 / fps) + 1e-6); // Exact up to one frame of quantization.
+            Assert.InRange(seconds, 0.110 - 1e-6, 0.110 + (1.0 / fps) + 1e-6);
         }
     }
 
@@ -55,15 +56,15 @@ public class BarBallisticsTests
         {
             float peak = 0, hold = 0;
             var dtMs = 1000f / fps;
-            BarBallistics.StepPeak(ref peak, ref hold, 200, dtMs, 300, 69, 0); // Capture.
+            BarBallistics.StepPeak(ref peak, ref hold, 200, dtMs, 300, 69, 0);
             var held = 0.0;
             while (peak >= 200 && held < 2000)
             {
-                BarBallistics.StepPeak(ref peak, ref hold, 0, dtMs, 300, 69, 0); // Bar dropped to zero.
+                BarBallistics.StepPeak(ref peak, ref hold, 0, dtMs, 300, 69, 0);
                 held += dtMs;
             }
 
-            Assert.InRange(held, 300, 300 + (2 * dtMs)); // Hold time quantized to the frame.
+            Assert.InRange(held, 300, 300 + (2 * dtMs));
 
             var fallMs = 0.0;
             while (peak > 0)
@@ -76,7 +77,7 @@ public class BarBallisticsTests
         }
     }
 
-    // 37 bricks: 6 px each with a 2 px gap; bottom brick first.
+    // 37 bricks, 6 px each with a 2 px gap, filled from the bottom up.
     private static readonly int[] Centres = System.Linq.Enumerable.Range(0, 37).Select(i => 352 - 6 - (i * 8) + 3).ToArray();
 
     [Fact]
@@ -94,9 +95,9 @@ public class BarBallisticsTests
     public void LitBricks_Hysteresis_SuppressesBoundaryFlickerButFollowsRealMoves()
     {
         const int h = 2;
-        var boundary = Centres[20]; // Level is around the centre of brick 20.
+        var boundary = Centres[20];
 
-        // Start with 20 lit, then wobble ±1 px around centre; it should not toggle.
+        // Begin with 20 bricks lit and wobble about a pixel around the centre - hysteresis means nothing should toggle.
         var lit = BarBallistics.StepLitBricks(0, Centres, boundary + 1, 0);
         Assert.Equal(20, lit);
         foreach (var wobble in new[] { 0, 1, -1, 1, 0, -1 })
@@ -105,18 +106,18 @@ public class BarBallisticsTests
             Assert.Equal(20, lit);
         }
 
-        // Clear moves trigger the hysteresis threshold.
+        // A clear move does cross the hysteresis threshold.
         lit = BarBallistics.StepLitBricks(lit, Centres, boundary - h, h);
         Assert.Equal(21, lit);
         lit = BarBallistics.StepLitBricks(lit, Centres, boundary + h + 1, h);
         Assert.Equal(20, lit);
 
-        // Large jumps settle in one step and stay within one brick of the centre rule.
+        // Big jumps settle in a single step, within a brick of the plain centre rule.
         for (var top = 0; top <= 360; top += 7)
         {
             lit = BarBallistics.StepLitBricks(lit, Centres, top, h);
             Assert.InRange(lit - Centres.Count(c => c >= top), -1, 1);
-            Assert.Equal(lit, BarBallistics.StepLitBricks(lit, Centres, top, h)); // idempotent
+            Assert.Equal(lit, BarBallistics.StepLitBricks(lit, Centres, top, h));
         }
     }
 
@@ -135,15 +136,15 @@ public class BarBallisticsTests
     }
 }
 
-/// <summary>End-to-end timing from onset/offset through the STFT and Spectrum ballistics at several refresh rates.</summary>
+// Timing from onset/offset through the STFT and the Spectrum ballistics, checked at a few refresh rates.
 public class EndToEndTimingTests
 {
     private const int Fs = 48000;
-    private const int Hop = 1520; // 31.7 ms measured cadence.
-    private const double Amp = 0.1; // −20 dBFS tone
+    private const int Hop = 1520;
+    private const double Amp = 0.1;
     private const double OffAt = 1.5;
 
-    // Default Spectrum preset.
+    // Uses the default Spectrum preset.
     private const int AttackMs = FormAudioSpectrum.SPECTRUM_ATTACK_MS;
     private const int ReleaseMs = FormAudioSpectrum.SPECTRUM_RELEASE_MS;
 
@@ -206,9 +207,9 @@ public class EndToEndTimingTests
         Crossing(trace, v => v <= 0.1f * steady, OffAt) - OffAt);
 
     [Theory]
-    [InlineData(13)] // ~60 Hz (bass, 341 ms window)
-    [InlineData(47)] // ~1 kHz (85 ms window)
-    [InlineData(68)] // ~6 kHz (85 ms window)
+    [InlineData(13)]
+    [InlineData(47)]
+    [InlineData(68)]
     public void OnsetAndRelease_AreConsistentAcrossRefreshRates(int band)
     {
         var engine = Signals.DefaultEngine();
@@ -223,7 +224,7 @@ public class EndToEndTimingTests
             var m = Measure(Display(analysis, fps), steady);
             _out.WriteLine($"{hz,6} Hz (N={engine.GetWindowLength(band)}) @ {fps,3} fps: 50% {m.t50 * 1000,4:F0} ms, 90% {m.t90 * 1000,4:F0} ms, release to 10% {m.release10 * 1000,4:F0} ms");
 
-            // Within one 30 Hz display period plus one analysis hop.
+            // Reaction should land within one 30 Hz display period plus one analysis hop.
             const double tolerance = (1.0 / 30) + (Hop / (double)Fs);
             Assert.InRange(m.t50 - reference.t50, -tolerance, tolerance);
             Assert.InRange(m.t90 - reference.t90, -tolerance, tolerance);
@@ -234,7 +235,7 @@ public class EndToEndTimingTests
     [Fact]
     public void MultiResolution_CutsMidAndHighFrequencyOnsetLatency()
     {
-        // Higher bands use shorter windows without changing measurement semantics.
+        // Higher bands use shorter windows but measure the same thing.
         var multi = Signals.DefaultEngine();
         var single = new BandSpectrumAnalyzer(multi.Plan, 2, new[] { 16384 });
 
@@ -254,8 +255,8 @@ public class EndToEndTimingTests
             _out.WriteLine($"{hz:F0} Hz analysis only: 90% rise {t90Multi * 1000:F0} ms (N={multi.GetWindowLength(band)}) vs {t90Single * 1000:F0} ms (N=16384); " +
                            $"fall to 10% {offMulti * 1000:F0} ms vs {offSingle * 1000:F0} ms");
 
-            Assert.Equal(steadyB, steadyA); // Same steady-state level.
-            // At least 75 ms faster in both directions.
+            Assert.Equal(steadyB, steadyA);
+            // The faster setting should win by at least 75 ms in both directions.
             Assert.True(t90Single - t90Multi >= 0.075, "expected a clearly faster rise");
             Assert.True(offSingle - offMulti >= 0.075, "expected a clearly faster release");
         }

@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Drawing;
 using System.Linq;
@@ -9,6 +10,7 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
+// Pokes the advanced visualization controls with synthetic frames to make sure they render and react sanely.
 public class AdvancedVisualizationControlTests
 {
     [Fact]

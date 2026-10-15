@@ -1,9 +1,10 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Collections.Generic;
 
 namespace Spectrum.Dsp;
 
-/// <summary>Inspectable description of how one display band is measured (dead-bar diagnostics).</summary>
+// Snapshot of what one band is doing internally, mostly for debugging/diagnostic views
 internal sealed class BandDiagnostic
 {
     public int Index { get; set; }
@@ -22,24 +23,20 @@ internal sealed class BandDiagnostic
     public double Normalized { get; set; }
 }
 
-/// <summary>Measures full-scale-sine-relative band power from interleaved PCM using windowed FFTs and overlapping-bin weights.</summary>
-/// <remarks>Each band selects a short window with at least four Hann main-lobe bins when possible; zero padding densifies bins but does not improve resolution.</remarks>
-/// <remarks>The front two channels are averaged independently, preventing anti-phase cancellation; bands partition each bin's power by frequency overlap.</remarks>
-/// <remarks>Window changes can cause small power errors near band edges; one instance is intended for a single analysis thread, and Analyze allocates no memory.</remarks>
+// FFT based band analyzer: picks a window size per band, sums bin power into bands, gives power relative to a full-scale sine
 internal sealed class BandSpectrumAnalyzer
 {
-    /// <summary>Hann main-lobe width from null to null, in bins.</summary>
+    // Each band needs at least this many FFT bins across it or it gets a longer window
     public const double MinBinsPerBand = 4.0;
 
-    /// <summary>Mean-square power of a full-scale sine.</summary>
+    // A full-scale sine has mean power 0.5, so dividing by this makes 1.0 == 0 dBFS
     public const double FullScaleSinePower = 0.5;
 
-    /// <summary>Reference window lengths for 48 kHz.</summary>
     public static readonly IReadOnlyList<int> ReferenceWindowLengths = new[] { 4096, 8192, 16384 };
 
     public const int ReferenceSampleRate = 48000;
 
-    /// <summary>Maximum zero-padding factor.</summary>
+    // Zero padding is capped so the FFT doesn't get silly big
     public const int MaxZeroPadding = 4;
 
     private readonly Resolution[] _resolutions;
@@ -48,6 +45,7 @@ internal sealed class BandSpectrumAnalyzer
     private readonly double[][] _bandWeights;
     private readonly double[] _lastRelativePower;
 
+    // Does all the one-time planning here: validates windows, assigns each band a resolution, precomputes bin weights
     public BandSpectrumAnalyzer(BandPlan plan, int channels, IReadOnlyList<int> windowLengths = null)
     {
         Plan = plan ?? throw new ArgumentNullException(nameof(plan));
@@ -57,12 +55,22 @@ internal sealed class BandSpectrumAnalyzer
         }
 
         Channels = channels;
+        // Only stereo is really analysed; extra channels are just skipped over in the interleaved data
         AnalysedChannels = Math.Min(channels, 2);
 
         var lengths = new List<int>(windowLengths ?? DefaultWindowLengths(plan.SampleRate));
         if (lengths.Count == 0)
         {
             throw new ArgumentException("At least one window length is required.", nameof(windowLengths));
+        }
+
+        foreach (var length in lengths)
+        {
+            // Power of two check via the classic x & (x-1) trick
+            if (length < 4 || (length & (length - 1)) != 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(windowLengths), length, "Window lengths must be powers of two >= 4.");
+            }
         }
 
         lengths.Sort();
@@ -73,6 +81,7 @@ internal sealed class BandSpectrumAnalyzer
         _bandWeights = new double[plan.Count][];
         _lastRelativePower = new double[plan.Count];
 
+        // Pick the shortest window that still gives the band enough bins; fall back to the longest
         var used = new bool[lengths.Count];
         for (var b = 0; b < plan.Count; b++)
         {
@@ -90,10 +99,10 @@ internal sealed class BandSpectrumAnalyzer
             used[r] = true;
         }
 
+        // Build one Resolution per window length, zero-padding when the narrowest band is thinner than a bin
         _resolutions = new Resolution[lengths.Count];
         for (var i = 0; i < lengths.Count; i++)
         {
-            // Pad enough to give the narrowest assigned band at least one bin.
             var narrowest = double.MaxValue;
             for (var b = 0; b < plan.Count; b++)
             {
@@ -117,6 +126,7 @@ internal sealed class BandSpectrumAnalyzer
             BuildWeights(b, plan[b], _resolutions[_bandResolution[b]].FftLength, fs);
         }
 
+        // Caller must hand us at least the longest window's worth of frames
         RequiredFrames = lengths[lengths.Count - 1];
     }
 
@@ -124,13 +134,12 @@ internal sealed class BandSpectrumAnalyzer
     public int Channels { get; }
     public int AnalysedChannels { get; }
 
-    /// <summary>Most recent frames required by <see cref="Analyze"/>.</summary>
     public int RequiredFrames { get; }
 
-    /// <summary>Window length used to analyze a band.</summary>
+    // Window length a given band ended up using
     public int GetWindowLength(int band) => _resolutions[_bandResolution[band]].WindowLength;
 
-    /// <summary>Scales reference window lengths by the nearest power of two to preserve approximate duration.</summary>
+    // Scale the 48k reference windows by the nearest power of two so time resolution stays similar at other rates
     public static int[] DefaultWindowLengths(int sampleRate)
     {
         var scale = Math.Pow(2, Math.Round(Math.Log((double)sampleRate / ReferenceSampleRate, 2)));
@@ -143,12 +152,11 @@ internal sealed class BandSpectrumAnalyzer
         return lengths;
     }
 
-    /// <summary>Analyzes recent interleaved frames and writes each band's power relative to a full-scale sine.</summary>
+    // Mix-only overload for callers that don't care about per-channel levels
     public void Analyze(float[] interleaved, int frameCount, double[] relativeBandPower)
         => Analyze(interleaved, frameCount, relativeBandPower, null, null);
 
-    /// <summary>Also writes optional independent front-channel band powers with the same full-scale-sine calibration.</summary>
-    /// <remarks>Output buffers must be distinct. Mono has measured left power and zero right power; additional device channels are excluded.</remarks>
+    // Main entry point: FFT the newest frames and fill per-band power (and optionally left/right)
     public void Analyze(float[] interleaved, int frameCount, double[] relativeBandPower,
         double[] leftRelativeBandPower, double[] rightRelativeBandPower)
     {
@@ -166,6 +174,7 @@ internal sealed class BandSpectrumAnalyzer
             throw new ArgumentException("Output must hold one value per band.", nameof(leftRelativeBandPower));
         if (rightRelativeBandPower != null && rightRelativeBandPower.Length < Plan.Count)
             throw new ArgumentException("Output must hold one value per band.", nameof(rightRelativeBandPower));
+        // Output buffers can't alias each other or we'd overwrite results mid-loop
         if (leftRelativeBandPower != null && ReferenceEquals(relativeBandPower, leftRelativeBandPower))
             throw new ArgumentException("Output buffers must be distinct.", nameof(leftRelativeBandPower));
         if (rightRelativeBandPower != null && (ReferenceEquals(relativeBandPower, rightRelativeBandPower) ||
@@ -177,6 +186,7 @@ internal sealed class BandSpectrumAnalyzer
             throw new ArgumentOutOfRangeException(nameof(frameCount), frameCount, "Not enough frames for the longest FFT.");
         }
 
+        // Skip FFTs for window sizes no band actually uses
         for (var r = 0; r < _resolutions.Length; r++)
         {
             if (_resolutions[r].InUse)
@@ -192,6 +202,7 @@ internal sealed class BandSpectrumAnalyzer
             var weights = _bandWeights[b];
             var first = _bandFirstBin[b];
 
+            // Band power = weighted sum of bin power; weights handle bins only partly inside the band
             var sum = 0.0;
             for (var i = 0; i < weights.Length; i++)
             {
@@ -202,8 +213,6 @@ internal sealed class BandSpectrumAnalyzer
             _lastRelativePower[b] = relative;
             relativeBandPower[b] = relative;
 
-            // Keep the original combined calculation unchanged. Independent outputs use the
-            // same frequency partition, without recovering either channel from the average.
             if (AnalysedChannels == 1)
             {
                 if (leftRelativeBandPower != null) leftRelativeBandPower[b] = relative;
@@ -224,6 +233,7 @@ internal sealed class BandSpectrumAnalyzer
         }
     }
 
+    // Copies the numbers out for display; weights are cloned so callers can't mutate our state
     public BandDiagnostic GetDiagnostic(int band)
     {
         var res = _resolutions[_bandResolution[band]];
@@ -248,14 +258,15 @@ internal sealed class BandSpectrumAnalyzer
         };
     }
 
+    // For each band works out which FFT bins it covers and how much of each edge bin counts (fractional overlap)
     private void BuildWeights(int band, FrequencyBand fb, int n, int fs)
     {
         var df = (double)fs / n;
         var half = n / 2;
 
-        // Each bin spans its midpoint boundaries; the Nyquist bin ends at Nyquist.
         var first = Math.Max(1, (int)Math.Floor((fb.LowerHz / df) + 0.5));
         var last = Math.Min(half, (int)Math.Ceiling((fb.UpperHz / df) - 0.5));
+        // Always take at least one bin, even for a band narrower than a bin
         if (last < first)
         {
             last = first;
@@ -265,6 +276,7 @@ internal sealed class BandSpectrumAnalyzer
         for (var k = first; k <= last; k++)
         {
             var binLo = (k - 0.5) * df;
+            // Nyquist bin is only half a bin wide, hence the special case
             var binHi = k == half ? k * df : (k + 0.5) * df;
             var overlap = Math.Min(fb.UpperHz, binHi) - Math.Max(fb.LowerHz, binLo);
             weights[k - first] = overlap > 0 ? overlap / (binHi - binLo) : 0.0;
@@ -274,6 +286,7 @@ internal sealed class BandSpectrumAnalyzer
         _bandWeights[band] = weights;
     }
 
+    // Windows the newest samples, runs the FFT and converts to per-bin power (stereo packed into one complex FFT)
     private void ComputeBinPower(Resolution res, float[] interleaved, int frameCount, bool independentChannels)
     {
         var n = res.FftLength;
@@ -283,6 +296,7 @@ internal sealed class BandSpectrumAnalyzer
         var re = res.Re;
         var im = res.Im;
 
+        // Left goes in the real part, right in the imaginary part so one FFT does both channels
         LoadWindowed(interleaved, start, ch, 0, window, res.WindowSum, re);
         if (AnalysedChannels == 2)
         {
@@ -293,7 +307,7 @@ internal sealed class BandSpectrumAnalyzer
             Array.Clear(im, 0, n);
         }
 
-        // Clear the zero-padded portion of each FFT input.
+        // Zero padding past the window gives finer bin spacing without changing the window itself
         if (n > res.WindowLength)
         {
             Array.Clear(re, res.WindowLength, n - res.WindowLength);
@@ -303,6 +317,7 @@ internal sealed class BandSpectrumAnalyzer
         res.Fft.Forward(re, im);
 
         var power = res.Power;
+        // Normalise by window energy so a full-scale sine reads the same whatever the window/FFT size
         var scale = 1.0 / (n * res.WindowSumOfSquares);
         var half = n / 2;
         power[0] = 0.0;
@@ -310,9 +325,9 @@ internal sealed class BandSpectrumAnalyzer
 
         if (AnalysedChannels == 2)
         {
-            // Separate the two real-channel spectra packed into one complex transform.
             for (var k = 1; k <= half; k++)
             {
+                // Split the two channels back apart using the conjugate symmetry of a real-input FFT
                 var a = re[k];
                 var bIm = im[k];
                 var c = re[n - k];
@@ -321,7 +336,7 @@ internal sealed class BandSpectrumAnalyzer
                 var left = (((a + c) * (a + c)) + ((bIm - d) * (bIm - d))) * 0.25;
                 var right = (((bIm + d) * (bIm + d)) + ((a - c) * (a - c))) * 0.25;
 
-                // Average channel powers and apply one-sided scaling except at Nyquist.
+                // Fold negative freqs into positive (x2) except Nyquist, which has no mirror
                 var oneSided = k == half ? 1.0 : 2.0;
                 power[k] = oneSided * 0.5 * (left + right) * scale;
                 if (independentChannels)
@@ -341,6 +356,7 @@ internal sealed class BandSpectrumAnalyzer
         }
     }
 
+    // Pulls one channel out of the interleaved buffer, scrubs NaN/Inf, removes DC and applies the window
     private static void LoadWindowed(float[] interleaved, int startFrame, int channels, int channel, double[] window, double windowSum, double[] dest)
     {
         var n = window.Length;
@@ -355,7 +371,7 @@ internal sealed class BandSpectrumAnalyzer
             weightedSum += window[i] * x;
         }
 
-        // Remove the window-weighted mean to prevent DC leakage into low bands.
+        // Window-weighted mean is subtracted so DC offset doesn't leak into the lowest band
         var mean = weightedSum / windowSum;
         for (var i = 0; i < n; i++)
         {
@@ -363,6 +379,7 @@ internal sealed class BandSpectrumAnalyzer
         }
     }
 
+    // Per window-size scratch buffers plus the precomputed Hann window, allocated once so Analyze doesn't allocate
     private sealed class Resolution
     {
         public Resolution(int length, int fftLength, bool inUse)
@@ -378,9 +395,9 @@ internal sealed class BandSpectrumAnalyzer
             LeftPower = new double[Power.Length];
             RightPower = new double[Power.Length];
 
-            // The periodic Hann window limits spectral leakage in signals with a wide dynamic range.
             for (var i = 0; i < length; i++)
             {
+                // Hann window; sums are kept for DC removal and power normalisation
                 var w = 0.5 - (0.5 * Math.Cos(2.0 * Math.PI * i / length));
                 Window[i] = w;
                 WindowSum += w;

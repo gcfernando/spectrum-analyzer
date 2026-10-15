@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Drawing;
 using System.Threading;
@@ -6,6 +7,7 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
+// Checks the visual themes and their colours.
 public class VisualThemeTests
 {
     [Fact]

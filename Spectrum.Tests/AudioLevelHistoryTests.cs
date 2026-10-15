@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Diagnostics;
 using System.Linq;
@@ -9,6 +10,7 @@ using Xunit.Abstractions;
 
 namespace Spectrum.Tests;
 
+// Checks how level history gets recorded, reset and copied as the audio stream changes shape.
 public class AudioLevelHistoryTests
 {
     private readonly ITestOutputHelper _output;
@@ -27,7 +29,7 @@ public class AudioLevelHistoryTests
         Assert.Equal(3.01029996, first.CrestDb(0), 5);
         Assert.Equal(3.01029996, first.CrestDb(1), 5);
         data.UpdateObservedWindow(new[] { 0.5f, -0.5f }, 2, 1, 48000, 2, 0, 0, epoch);
-        Assert.Equal(1, data.ObservationCount); // A channel-format change starts a new history.
+        Assert.Equal(1, data.ObservationCount);
         Assert.Equal(0, data.ObservationAt(0).CrestDb(0));
         Assert.True(double.IsNaN(data.ObservationAt(0).CrestDb(1)));
     }
@@ -134,7 +136,7 @@ public class AudioLevelHistoryTests
         Assert.False(copy.HasStereo);
         Assert.Throws<ArgumentException>(() => copy.SetChannelSpectrum(new double[82], right));
         copy.SetChannelSpectrum(null, null);
-        Assert.False(copy.HasChannelSpectrum); // Skipping analysis is not measured spectral silence.
+        Assert.False(copy.HasChannelSpectrum);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+// Developer :: > Gehan Fernando
 using System;
 using System.Configuration;
 using System.Reflection;
@@ -6,6 +7,7 @@ using Xunit;
 
 namespace Spectrum.Tests;
 
+// Checks the visual style options and how they map to drawing.
 public class VisualStyleTests
 {
     [Theory]
@@ -57,13 +59,13 @@ public class VisualStyleTests
     }
 
     [Fact]
-    public void StylePreferenceIsUserScopedWithSafeDefault()
+    public void StylePreferenceIsUserScopedWithUnsetDefault()
     {
         var property = typeof(VisualizerPreferences).GetProperty(nameof(VisualizerPreferences.Style));
 
         Assert.NotNull(property);
         Assert.NotNull(property.GetCustomAttribute<UserScopedSettingAttribute>());
-        Assert.Equal("None", property.GetCustomAttribute<DefaultSettingValueAttribute>().Value);
+        Assert.Equal("", property.GetCustomAttribute<DefaultSettingValueAttribute>().Value);
     }
 
     [Fact]
