@@ -28,6 +28,12 @@ defaults:
         height: 720
         alt: "Spectrum Overview mode with a frequency spectrum and left and right channel meters"
 
+  - scope:
+      path: "THIRD_PARTY_NOTICES.md"
+    values:
+      title: "Spectrum Third-Party Dependency Notices and Provenance"
+      description: "Review Spectrum audio dependency versions, attribution, available license texts and provenance notes for BASS, BassWASAPI, BASS.NET and NAudio."
+
 # Public documentation navigation and presentation.
 repository: gcfernando/spectrum-analyzer
 theme: jekyll-theme-primer
