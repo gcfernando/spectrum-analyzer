@@ -24,14 +24,14 @@ public class AnalyticalModeTests
     private static void OnSta(Action action) => CombinedRandomizationTests.RunOnSta(action);
 
     [Fact]
-    public void RegistryContainsExactlyTheEighteenImplementedModesAndNoRetiredViews()
+    public void RegistryContainsTheImplementedModesAndNoRetiredAliases()
     {
         OnSta(() =>
         {
             using var form = CombinedRandomizationTests.CreateForm();
             var selector = Field<ComboBox>(form, "_modeSelector");
             var expected = new[] { "Spectrum", "Bricks", "LED", "Waterfall", "Radial Spectrum", "Contour", "Peak Trace",
-                "Threshold Monitor", "Band Matrix", "Octave Spectrum", "Level Change", "Octave Waterfall", "Stereo Levels", "Oscilloscope", "Spectral Balance", "Advanced Spectral Balance", "Stereo Spectrum", "Dynamics History", "Spectral History" };
+                "Threshold Monitor", "Band Matrix", "Octave Spectrum", "Level Change", "Octave Waterfall", "Stereo Levels", "Oscilloscope", "Spectral Balance", "Advanced Spectral Balance", "Stereo Spectrum", "Dynamics History", "Spectral History", "Overview", "Stereo Compare" };
             Assert.Equal(FormAudioSpectrum.SortModeNames(expected), selector.Items.Cast<string>().ToArray());
             foreach (var retired in new[] { "Dots", "Lollipop", "Wave", "Orbit History", "Level Change Map", "Frequency Ribbon" })
                 Assert.DoesNotContain(retired, selector.Items.Cast<string>());
@@ -63,7 +63,7 @@ public class AnalyticalModeTests
             control.SetSpectrum(new byte[] { 100 }, "Ice", (AdvancedVisualizationMode)value);
             Assert.Equal(target, control.Mode);
             Assert.Equal(2, Field<int>(control, "_historyCount"));
-            Assert.Throws<ArgumentOutOfRangeException>(() => control.Mode = (AdvancedVisualizationMode)20);
+            Assert.Throws<ArgumentOutOfRangeException>(() => control.Mode = (AdvancedVisualizationMode)22);
             Assert.Throws<ArgumentOutOfRangeException>(() => control.SetSpectrum(new byte[83], "Ice", (AdvancedVisualizationMode)(-1)));
         });
     }
@@ -71,7 +71,6 @@ public class AnalyticalModeTests
     [Theory]
     [InlineData("Waterfall")]
     [InlineData("Octave Waterfall")]
-    [InlineData("Radial Spectrum")]
     [InlineData("Band Matrix")]
     [InlineData("Octave Spectrum")]
     [InlineData("Level Change")]
@@ -345,11 +344,11 @@ public class AnalyticalModeTests
         {
             using var control = new AdvancedVisualizationControl { Size = new Size(520, 100), Mode = AdvancedVisualizationMode.OctaveWaterfall };
             for (var frame = 0; frame < 160; frame++) control.SetSpectrum(new byte[] { 180 });
-            Assert.Contains("58 displayed frames", Field<string>(control, "_historyCaption"));
+            Assert.Contains("58 frames", Field<string>(control, "_historyCaption"));
             control.Mode = AdvancedVisualizationMode.Waterfall;
-            Assert.Contains("78 displayed frames", Field<string>(control, "_historyCaption"));
+            Assert.Contains("78 frames", Field<string>(control, "_historyCaption"));
             control.Size = new Size(520, 280);
-            Assert.Contains("160 displayed frames", Field<string>(control, "_historyCaption"));
+            Assert.Contains("160 frames", Field<string>(control, "_historyCaption"));
         });
     }
 
@@ -372,8 +371,8 @@ public class AnalyticalModeTests
             next[1] = 240; next[2] = 0;
             control.SetSpectrum(next);
             using var bitmap = VisualizationReadabilityTests.Render(control);
-            Assert.Equal(BarColorThemes.Studio.High.ToArgb(), bitmap.GetPixel(15, 80).ToArgb());
-            Assert.Equal(BarColorThemes.Studio.Low.ToArgb(), bitmap.GetPixel(25, 125).ToArgb());
+            Assert.Equal(BarColorThemes.EnsureContrast(Color.FromArgb(40, 165, 184), control.BackColor).ToArgb(), bitmap.GetPixel(15, 80).ToArgb());
+            Assert.Equal(BarColorThemes.EnsureContrast(Color.FromArgb(211, 125, 56), control.BackColor).ToArgb(), bitmap.GetPixel(25, 125).ToArgb());
         });
     }
 

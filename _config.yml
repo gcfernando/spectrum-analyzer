@@ -2,7 +2,7 @@
 url: "https://gcfernando.github.io"
 baseurl: "/spectrum-analyzer"
 title: "Spectrum Audio Analyzer"
-description: "Windows WASAPI audio spectrum analyzer in C# and Windows Forms, with 83 logarithmic bands, 18 visualization modes and 13 themes."
+description: "Windows WASAPI audio spectrum analyzer in C# and Windows Forms, with 83 logarithmic bands, 21 visualization modes and 13 palettes."
 lang: "en"
 plugins:
   - jekyll-sitemap
@@ -21,7 +21,12 @@ defaults:
       path: "README.md"
     values:
       title: "Spectrum — Windows WASAPI Audio Spectrum Analyzer"
-      description: "Windows WASAPI audio spectrum analyzer in C# and Windows Forms, with 83 logarithmic bands, 18 visualization modes and 13 themes."
+      description: "Windows WASAPI audio spectrum analyzer in C# and Windows Forms, with 83 logarithmic bands, 21 visualization modes and 13 palettes."
+      image:
+        path: /assets/images/overview.png
+        width: 1800
+        height: 720
+        alt: "Spectrum Overview mode with a frequency spectrum and left and right channel meters"
 
 # Public documentation navigation and presentation.
 repository: gcfernando/spectrum-analyzer

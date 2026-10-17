@@ -42,7 +42,7 @@ public class StableWindowLayoutTests
                 var initialMinimum = form.MinimumSize;
                 var selector = Field<ComboBox>(form, "_modeSelector");
                 var registeredModes = selector.Items.Cast<string>().ToArray();
-                Assert.Equal(19, registeredModes.Length);
+                Assert.Equal(21, registeredModes.Length);
                 Assert.Equal(FormAudioSpectrum.VisualModeNames.OrderBy(name => name),
                     registeredModes.OrderBy(name => name));
                 foreach (var mode in registeredModes)

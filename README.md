@@ -1,14 +1,6 @@
-<!--
-  SEO: audio spectrum analyzer, real-time FFT visualizer, music visualizer, WASAPI loopback, C# .NET Framework 4.8,
-  Windows Forms, BASS, BassWASAPI, dBFS meter, system audio visualizer, oscilloscope, waterfall spectrogram
--->
-<p align="center">
-  🟢 <b>Real-time FFT</b> · 🔵 <b>WASAPI loopback</b> · 🟣 <b>19 modes</b> · 🟠 <b>13 themes</b> · 🔴 <b>dBFS accurate</b> · 🟡 <b>xUnit tested</b>
-</p>
 <div align="center" markdown="1">
-  <h1>🎚️ Spectrum — Real-Time Audio Spectrum Analyzer &amp; Music Visualizer for Windows</h1>
-  <p><strong>A .NET Framework Windows Forms visualizer for real-time system-audio analysis, with 83 logarithmic bands and 19 live visualization modes.</strong></p>
-  <p><code>▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁ &nbsp; S P E C T R U M &nbsp; ▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁</code></p>
+  <h1>Spectrum — Audio Spectrum Analyzer &amp; Music Visualizer for Windows</h1>
+  <p><strong>Visualize system audio with 83 logarithmic frequency bands, 21 modes, and 13 colour palettes.</strong></p>
   <table>
     <tr>
       <td><img alt=".NET Framework 4.8" src="https://img.shields.io/badge/.NET%20Framework-4.8-512BD4?style=for-the-badge&amp;logo=dotnet&amp;logoColor=white"></td>
@@ -17,9 +9,9 @@
       <td><img alt="WASAPI Loopback" src="https://img.shields.io/badge/Audio-WASAPI%20Loopback-00A4EF?style=for-the-badge"></td>
     </tr>
   </table>
-  <p><strong>83 logarithmic bands</strong> · <strong>19 visualization modes</strong> · <strong>13 colour themes</strong> · <strong>60 FPS rendering target</strong></p>
 </div>
-A C# .NET Framework 4.8 Windows Forms application that captures your system's audio output in real time and renders it as an animated frequency spectrum using 83 vertical bars. Audio capture is handled by BASS and BassWASAPI via Windows WASAPI loopback, and an FFT-based band analyzer measures each bar in dBFS — so it works as both a **real-time audio visualizer for music** and a readable **C# FFT spectrum analyzer implementation** you can study, with a deterministic xUnit test suite.
+
+Spectrum is a C# Windows Forms application for real-time audio visualization and FFT analysis. It captures the Windows default audio output through WASAPI loopback using BASS and BassWASAPI. Explore frequency spectra, stereo levels, PCM waveforms, and display histories, or use it as a reference implementation of a .NET Framework 4.8 band analyzer. Spectrum analyzes audio; playback and volume remain controlled by your source application or Windows.
 
 ---
 
@@ -29,12 +21,12 @@ A C# .NET Framework 4.8 Windows Forms application that captures your system's au
 
 | 🎚️ Frequency Analysis | 🎬 Visualization  |    🎨 Customization    |     ⚡ Presentation      |
 | :-------------------: | :---------------: | :--------------------: | :----------------------: |
-|     **83 bands**      |   **19 modes**    |     **13 themes**      |    **60 FPS target**     |
-|  **20 Hz – 20 kHz**   | Runtime switching | **5 effects + `None`** | **25 ms analysis timer** |
+|     **83 bands**      |   **21 modes**    |     **13 palettes**     |    **60 FPS target**     |
+|  **20 Hz – 20 kHz**   | Runtime switching | **Effects + Guides**   | **25 ms analysis timer** |
 
 ### 🧭 Navigation
 
-[**✨ Features**](#features) · [**🎛️ Modes**](#modes) · [**📸 Screenshots**](#gallery) · [**🪄 Styles**](#styles) · [**🎨 Themes**](#themes) · [**⚙️ Configuration**](#configuration) · [**🏗️ Build**](#build) · [**🧪 Tests**](#tests) · [**📐 Measurement**](#measurement) · [**❓ FAQ**](#faq)
+[Features](#features) · [Modes](#modes) · [Screenshots](#gallery) · [Effects](#styles) · [Palettes](#themes) · [Configuration](#configuration) · [Requirements](#requirements) · [Build](#build) · [Run](#running) · [Tests](#tests) · [Measurement](#measurement) · [FAQ](#faq)
 
 ### ⌨️ Keyboard Controls
 
@@ -43,15 +35,16 @@ A C# .NET Framework 4.8 Windows Forms application that captures your system's au
 | <kbd>Ctrl</kbd> + <kbd>M</kbd> | Cycle visualization modes           |
 | <kbd>Ctrl</kbd> + <kbd>T</kbd> | Cycle colour themes                 |
 | <kbd>Ctrl</kbd> + <kbd>R</kbd> | Open Fixed/Random rotation settings |
+| <kbd>Ctrl</kbd> + <kbd>G</kbd> | Toggle reference guides              |
+| <kbd>Ctrl</kbd> + <kbd>Space</kbd> | Freeze or resume the display       |
+| <kbd>Ctrl</kbd> + <kbd>S</kbd> | Save a PNG image                     |
 |         <kbd>F12</kbd>         | Toggle always-on-top                |
 
 ### 🚀 Quick Start
 
-```text
-1. Open Spectrum.sln in Visual Studio 2022 with .NET desktop development tools
-2. Restore NuGet packages and build the Release configuration (see Build below)
-3. Run Spectrum.exe from Spectrum\bin\Release\
-```
+1. Check the [Windows and .NET Framework requirements](#requirements), then open [Spectrum.sln](Spectrum.sln) in Visual Studio 2022 with .NET desktop development tools.
+2. [Restore NuGet packages and build the Release configuration](#build).
+3. [Run Spectrum](#running) from `Spectrum\bin\Release\`.
 
 > [!TIP]
 > Spectrum automatically captures the Windows default audio output through WASAPI loopback, so normal use does not require selecting an input device.
@@ -63,15 +56,15 @@ A C# .NET Framework 4.8 Windows Forms application that captures your system's au
 ## ✨ Features
 
 > [!NOTE]
-> Spectrum combines measurement accuracy, responsive presentation, runtime customization, and automatic device recovery in a single Windows Forms application.
+> Explore measured band levels, stereo signals, and display histories with runtime customization and automatic device recovery.
 
 - **83-bar frequency spectrum** with a fixed logarithmic 20 Hz – 20 kHz viewport, labelled frequency axis and a 0 to -72 dBFS level axis on both sides
 - **Calibrated spectrum grid** at every 6 dB, with logarithmic frequency guides at 20, 30, 40, 60, 100, 200, 300, 400, 600, 1k, 2k, 3k, 4k, 6k, 10k and 20k Hz; crowded frequency labels are omitted without moving their guides
 - **Measured band levels** — each bar is the integrated power of its frequency band in dBFS (see _Measurement_)
-- **19 visualization modes** selectable at runtime, with an initial value from `App.config`
-- **Optional styles** with a safe `None` default: Pulse, Glow, Trail, Scanline, and Precision are enabled only where their renderer is meaningful
-- **13 colour themes** selectable at runtime, including Studio, Platinum Light, and High Contrast instrument palettes
-- **Live mode, style, and theme selectors** in the title bar; changes apply immediately without restarting
+- **21 visualization modes**, including Overview and Stereo Compare, selectable at runtime with an initial value from `App.config`
+- **Optional effects** with a safe `None` default: Pulse, Soft Glow, Trail, and Outline are enabled only where their renderer is meaningful; reference guides are independently selectable
+- **13 colour palettes** plus an independent application appearance, including light, dark, system, and high contrast choices
+- **Live mode, effect, and palette selectors**; changes apply immediately without restarting
 - **Alphabetical mode discovery** uses case-insensitive current-culture names with a deterministic ordinal tie-break; existing mode identifiers and saved selections are preserved
 - **Original vector mode icons** distinguish spectrum, stereo, waveform, matrix, threshold, and history views without bitmap stretching
 - **1200 x 480 default client window**, manually resizable without mode-driven size changes, with individually accessible window controls, visible keyboard focus, and descriptive mode tooltips
@@ -83,9 +76,13 @@ A C# .NET Framework 4.8 Windows Forms application that captures your system's au
 - **Auto device recovery** — restores capture automatically when the default audio device changes
 - **Scaling layout** — bars and labels are laid out from the window's client size (the process does not declare per-monitor DPI awareness, so Windows scales it on high-DPI monitors)
 - **Keyboard shortcuts** — `Ctrl+M` cycles visualization modes; `Ctrl+T` cycles colour themes
-- **Fixed or Random rotation** — choose Fixed to keep selections stable, or Random to change mode, compatible style, and theme together at a configurable 1–240 minute interval (default 5 minutes); preferences are saved per user
+- **Fixed or Random rotation** — choose Fixed to keep selections stable, or Random to change mode, compatible effect, and palette together at a configurable 1–240 minute interval (default 5 minutes); preferences are saved per user
 - **Rotation settings shortcut** — press `Ctrl+R` to open Fixed/Random and interval settings
 - **F12 toggle** — toggle always-on-top
+- **View menu** — browse modes by purpose, search with purpose descriptions, preview presets, choose appearance, adjust effect intensity, band-change range or monitoring threshold, show octave values, choose Waterfall resolution, save an image, and inspect capture details
+- **Display Freeze** — hold the visible frame and visual ballistics while capture continues; resuming uses the latest captured data and starts a fresh display-history/delta baseline
+- **Goal-based presets** — Overview, Analyze, Compare Peaks, Stereo, Band Change, Retro Bricks, Ambient Radial, History, and Clean Outline
+- **Compact toolbar overflow** — small or vertically crowded windows retain the three native selectors and View; Rotation, Guides, Freeze, and Pin remain available through View → Display controls and their shortcuts
 - **Single-instance** — uses a named mutex to prevent multiple instances
 
 Spectrum is an **analyzer, not a player or audio processor**. Its selectors, visual styles, and rotation settings change the display, not the captured audio. It has no playback, pause, stop, mute, master-volume, equalizer, or audio-effect controls, and no user-facing input/output device selector. Control playback and volume in the source application or Windows; Spectrum follows the default render endpoint.
@@ -96,208 +93,221 @@ Spectrum is an **analyzer, not a player or audio processor**. Its selectors, vis
 
 ## 🎛️ Visualization Modes
 
-<div align="center" markdown="1">
-
-`Advanced Spectral Balance` · `Band Matrix` · `Bricks` · `Contour` · `Dynamics History` · `LED` · `Level Change` · `Octave Spectrum` · `Octave Waterfall` · `Oscilloscope`
-
-`Peak Trace` · `Radial Spectrum` · `Spectral Balance` · `Spectral History` · `Spectrum` · `Stereo Levels` · `Stereo Spectrum` · `Threshold Monitor` · `Waterfall`
-
-</div>
-
 Choose a visualization mode from the **Mode** selector in the title bar to change it immediately. The
-supported modes are:
+table uses the names shown in the interface. Configuration retains `Level Change` for **Band Level Change**
+and `Spectral History` for **Perspective History** so existing saved selections remain compatible.
 
 | Mode                               | Best For                                                                                                          |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `Advanced Spectral Balance`        | Seven FFT-measured bands (20 Hz–20 kHz) in dBFS relative to a full-scale sine                                     |
-| `Band Matrix`                      | Compact single-frame 83-band matrix with frequency and level labels                                               |
+| `Band Level Change`                | Per-band displayed-level change with an explicit adjustable range, zero reference, and overflow markers; not a power-domain spectral-flux or beat measurement |
+| `Band Matrix`                      | Frequency-grouped 83-band inspector with a selectable, pinned numerical readout                                    |
 | `Bricks` (configured startup mode) | Retro block aesthetic; 80s/Synthwave music                                                                        |
 | `Contour`                          | Connected line across the measured frequency bands                                                                |
 | `Dynamics History`                 | Actual front-channel RMS and sample-peak history; unavailable audio intervals remain gaps                         |
 | `LED`                              | Segmented frequency-band display; not a calibrated VU/PPM meter                                                   |
-| `Level Change`                     | Per-band frame-to-frame displayed-level change; not a power-domain spectral-flux or beat measurement              |
-| `Octave Spectrum`                  | Ten grouped octave-range meters; approximate powers reconstructed from displayed band values                      |
-| `Octave Waterfall`                 | Scrolling grouped-octave display history                                                                          |
-| `Oscilloscope`                     | Actual front-left PCM waveform with a labeled auto-ranging amplitude scale                                        |
-| `Peak Trace`                       | Current spectrum with a short frequency-history trace                                                             |
-| `Radial Spectrum`                  | Frequency bands arranged around a circle                                                                          |
-| `Spectral Balance`                 | Estimated bass/mid/high shares derived from displayed frequency-band power                                        |
-| `Spectral History`                 | Perspective stack of genuinely captured display spectra; spacing denotes received frames, not uniform sample time |
+| `Octave Spectrum`                  | Ten grouped octave-range meters with a level scale and optional values; approximate powers reconstructed from displayed band values |
+| `Octave Waterfall`                 | Coarse Waterfall resolution, also retained as a selectable mode for saved-setting compatibility                    |
+| `Oscilloscope`                     | Actual front-left or mono PCM waveform with time ticks and a labeled auto-ranging amplitude reference             |
+| `Overview`                         | Measured frequency spectrum beside independent front-channel levels                                               |
+| `Peak Trace`                       | Current spectrum and a dashed held envelope, identified by a live/held key and hold duration                       |
+| `Perspective History`              | Creative perspective stack emphasizing the newest captured spectrum; depth denotes received frames, not uniform sample time |
+| `Radial Spectrum`                  | Frequency bands around a circle with a frequency key and a strongest-band readout in wide layouts                  |
+| `Spectral Balance`                 | Estimated relative bass/mid/high power shares with stable group identities across palettes                         |
 | `Spectrum` (fallback)              | Continuous real-time frequency-band analysis                                                                      |
+| `Stereo Compare`                   | Independent left/right frequency spectra overlaid on shared scales, with solid and dashed traces                  |
 | `Stereo Levels`                    | Independent front-L/R RMS and sample peaks in amplitude-relative dBFS                                             |
 | `Stereo Spectrum`                  | Independent front-left and front-right frequency spectra                                                          |
-| `Threshold Monitor`                | Current band levels classified around a visible monitoring threshold                                              |
+| `Threshold Monitor`                | Current band levels classified around an adjustable threshold, with stable below/above semantics and crossing caps |
 | `Waterfall`                        | Scrolling history of received frequency display frames, not a uniformly sample-timed spectrogram                  |
 
-Retired selections remain compatible through migration: Dots → LED, Wave → Contour, Lollipop/Center/Ambient Particles → Spectrum, Mirror → Bricks, Note Map → Contour, Orbit History/Frequency Ribbon → Peak Trace, and Level Change Map/Transient Map/Spectral Flux → Level Change. These are aliases, not additional selectable modes.
+Overview combines existing measured views in one workspace. Stereo Compare places the independent channel spectra on a shared reference; unavailable channel data stays explicitly unavailable. Neither layout changes the audio analysis.
+
+Retired selections remain compatible through migration: Dots → LED, Wave → Contour, Lollipop/Center/Ambient Particles → Spectrum, Mirror → Bricks, Note Map → Contour, Orbit History/Frequency Ribbon → Peak Trace, and Level Change Map/Transient Map/Spectral Flux → Level Change. These are aliases, not additional selectable modes. Existing advanced-mode numeric identifiers remain stable; Overview and Stereo Compare append new identifiers.
 
 <a id="gallery"></a>
 
 ## 📸 Visualization Mode Screenshots
 
-> 🎬 Real screenshots of every mode, captured from the running application (1200 × 480 window, WASAPI loopback of live system audio, `ClassicSmooth` theme, `Precision` style).
+The gallery covers all 21 current modes. Each screenshot links to its full-size image. Palettes, effects,
+and guide settings can vary between images; see [Measurement](#measurement) for the meaning and limits
+of each display.
 
-### 📊 Spectrum
+### Overview
 
-![Spectrum mode - Classic 83-band real-time frequency spectrum in Spectrum audio analyzer](assets/images/mode-spectrum.png)
+<a href="assets/images/overview.png"><img src="assets/images/overview.png" alt="Overview mode with a frequency contour beside left and right channel meters" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Classic 83-band real-time frequency spectrum._
+_A combined view of the measured frequency spectrum and front-channel RMS and sample-peak levels._
 
-### 🧱 Bricks
+### Spectrum
 
-![Bricks mode - Retro block-style LED bricks in Spectrum audio analyzer](assets/images/mode-bricks.png)
+<a href="assets/images/Spectrum.png"><img src="assets/images/Spectrum.png" alt="Spectrum mode showing 83 logarithmic frequency bands and peak markers" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Retro block-style LED bricks._
+_Continuous frequency-band levels across the logarithmic spectrum._
 
-### 💡 LED
+### Bricks
 
-![LED mode - Segmented LED frequency meter in Spectrum audio analyzer](assets/images/mode-led.png)
+<a href="assets/images/Bricks.png"><img src="assets/images/Bricks.png" alt="Bricks mode showing frequency-band levels as stacked rectangular cells" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Segmented LED frequency meter._
+_A block-style presentation of the same measured frequency bands._
 
-### 🔢 Band Matrix
+### LED
 
-![Band Matrix mode - Compact 83-band matrix with labels in Spectrum audio analyzer](assets/images/mode-band-matrix.png)
+<a href="assets/images/LED.png"><img src="assets/images/LED.png" alt="LED mode showing segmented frequency-band meters" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Compact 83-band matrix with labels._
+_Segmented frequency meters with independent peak markers._
 
-### 〰️ Contour
+### Band Matrix
 
-![Contour mode - Connected frequency contour line in Spectrum audio analyzer](assets/images/mode-contour.png)
+<a href="assets/images/BandMatrix.png"><img src="assets/images/BandMatrix.png" alt="Band Matrix mode with frequency-grouped cells and numerical band readings" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Connected frequency contour line._
+_An 83-band inspector with grouped frequencies and a selectable pinned reading._
 
-### 📈 Peak Trace
+### Contour
 
-![Peak Trace mode - Spectrum plus short frequency-history trace in Spectrum audio analyzer](assets/images/mode-peak-trace.png)
+<a href="assets/images/Contour.png"><img src="assets/images/Contour.png" alt="Contour mode drawing a connected line across measured frequency bands" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Spectrum plus short frequency-history trace._
+_A connected contour of the current spectrum._
 
-### 🎡 Radial Spectrum
+### Peak Trace
 
-![Radial Spectrum mode - Frequency bands arranged in a circle in Spectrum audio analyzer](assets/images/mode-radial-spectrum.png)
+<a href="assets/images/PeakTrace.png"><img src="assets/images/PeakTrace.png" alt="Peak Trace mode with a live spectrum and dashed held envelope" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Frequency bands arranged in a circle._
+_The current spectrum alongside a dashed held-peak envelope._
 
-### 🎧 Stereo Spectrum
+### Radial Spectrum
 
-![Stereo Spectrum mode - Independent left/right spectra in Spectrum audio analyzer](assets/images/mode-stereo-spectrum.png)
+<a href="assets/images/RadialSpectrum.png"><img src="assets/images/RadialSpectrum.png" alt="Radial Spectrum mode arranging frequency bands around a circle" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Independent left/right spectra._
+_A circular spectrum with frequency references and a strongest-band readout._
 
-### 🔊 Stereo Levels
+### Stereo Spectrum
 
-![Stereo Levels mode - Front L/R RMS and sample peaks in Spectrum audio analyzer](assets/images/mode-stereo-levels.png)
+<a href="assets/images/StereoSpectrum.png"><img src="assets/images/StereoSpectrum.png" alt="Stereo Spectrum mode showing separate left and right frequency spectra" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Front L/R RMS and sample peaks._
+_Independent front-left and front-right spectra on aligned scales._
 
-### 🌊 Oscilloscope
+### Stereo Compare
 
-![Oscilloscope mode - Front-left PCM waveform in Spectrum audio analyzer](assets/images/mode-oscilloscope.png)
+<a href="assets/images/StereoCompare.png"><img src="assets/images/StereoCompare.png" alt="Stereo Compare mode overlaying solid and dashed left and right spectra" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Front-left PCM waveform._
+_Compare independent channel spectra on shared frequency and level references._
 
-### 🎼 Octave Spectrum
+### Stereo Levels
 
-![Octave Spectrum mode - Ten grouped octave meters in Spectrum audio analyzer](assets/images/mode-octave-spectrum.png)
+<a href="assets/images/StereoLevel.png"><img src="assets/images/StereoLevel.png" alt="Stereo Levels mode showing front-left and front-right RMS and sample-peak meters" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Ten grouped octave meters._
+_Channel RMS and sample peaks in amplitude-relative dBFS._
 
-### 🏞️ Octave Waterfall
+### Oscilloscope
 
-![Octave Waterfall mode - Scrolling grouped-octave history in Spectrum audio analyzer](assets/images/mode-octave-waterfall.png)
+<a href="assets/images/Oscilloscope.png"><img src="assets/images/Oscilloscope.png" alt="Oscilloscope mode showing a PCM waveform with time and amplitude references" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Scrolling grouped-octave history._
+_The captured front-left or mono waveform with a labeled auto-ranging amplitude scale._
 
-### 🌈 Waterfall
+### Octave Spectrum
 
-![Waterfall mode - Scrolling spectrogram-style history in Spectrum audio analyzer](assets/images/mode-waterfall.png)
+<a href="assets/images/OctaveSpectrum.png"><img src="assets/images/OctaveSpectrum.png" alt="Octave Spectrum mode showing ten grouped octave-range meters" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Scrolling spectrogram-style history._
+_Ten octave-range groups reconstructed approximately from displayed band powers._
 
-### 🏔️ Spectral History
+### Octave Waterfall
 
-![Spectral History mode - Perspective stack of captured spectra in Spectrum audio analyzer](assets/images/mode-spectral-history.png)
+<a href="assets/images/OctaveWaterfall.png"><img src="assets/images/OctaveWaterfall.png" alt="Octave Waterfall mode showing a scrolling history of grouped octave levels" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Perspective stack of captured spectra._
+_The coarse-resolution Waterfall view with an intensity legend._
 
-### ⏱️ Dynamics History
+### Waterfall
 
-![Dynamics History mode - Front-channel RMS and peak history in Spectrum audio analyzer](assets/images/mode-dynamics-history.png)
+<a href="assets/images/Waterfall.png"><img src="assets/images/Waterfall.png" alt="Waterfall mode showing received frequency frames as a scrolling intensity map" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Front-channel RMS and peak history._
+_Frequency display history with an ordered intensity scale; rows represent received frames, not uniform sample time._
 
-### ⚡ Level Change
+### Perspective History
 
-![Level Change mode - Per-band frame-to-frame level change in Spectrum audio analyzer](assets/images/mode-level-change.png)
+<a href="assets/images/PerspectiveHistory.png"><img src="assets/images/PerspectiveHistory.png" alt="Perspective History mode stacking captured spectra with the newest trace emphasized" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Per-band frame-to-frame level change._
+_A creative perspective stack; depth represents received frames, not a uniform time axis._
 
-### 🚦 Threshold Monitor
+### Dynamics History
 
-![Threshold Monitor mode - Band levels around a monitoring threshold in Spectrum audio analyzer](assets/images/mode-threshold-monitor.png)
+<a href="assets/images/DynamicsHistory.png"><img src="assets/images/DynamicsHistory.png" alt="Dynamics History mode plotting channel RMS and sample peaks over time" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Band levels around a monitoring threshold._
+_Actual front-channel RMS and sample-peak history with unavailable intervals preserved as gaps._
 
-### ⚖️ Spectral Balance
+### Band Level Change
 
-![Spectral Balance mode - Bass / mid / high share estimate in Spectrum audio analyzer](assets/images/mode-spectral-balance.png)
+<a href="assets/images/BandLevelChange.png"><img src="assets/images/BandLevelChange.png" alt="Band Level Change mode showing signed changes around a zero reference" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Bass / mid / high share estimate._
+_Per-band changes in displayed level with adjustable range and overflow markers._
 
-### 🎯 Advanced Spectral Balance
+### Threshold Monitor
 
-![Advanced Spectral Balance mode - Seven FFT-measured bands in dBFS in Spectrum audio analyzer](assets/images/mode-advanced-spectral-balance.png)
+<a href="assets/images/ThresholdMonitor.png"><img src="assets/images/ThresholdMonitor.png" alt="Threshold Monitor mode classifying band levels around a labeled threshold" width="1800" height="720" loading="lazy" decoding="async"></a>
 
-_Seven FFT-measured bands in dBFS._
+_Band levels with stable below/above categories and threshold-crossing markers._
+
+### Spectral Balance
+
+<a href="assets/images/SpectrumBalance.png"><img src="assets/images/SpectrumBalance.png" alt="Spectral Balance mode showing relative bass, mid, and high power shares" width="1800" height="720" loading="lazy" decoding="async"></a>
+
+_Estimated relative power shares with consistent bass, mid, and high identities._
+
+### Advanced Spectral Balance
+
+<a href="assets/images/AdvancedSpectralBalance.png"><img src="assets/images/AdvancedSpectralBalance.png" alt="Advanced Spectral Balance mode showing seven measured frequency-band levels" width="1800" height="720" loading="lazy" decoding="async"></a>
+
+_Seven FFT-measured bands in dBFS, using the full-scale-sine power reference._
 
 <a id="styles"></a>
 
-## 🪄 Visual Styles
+## 🪄 Visual Effects and Reference Guides
 
-> **Style model:** the visualization mode owns the geometry; the selected style adds a compatible presentation effect on top of that mode.
+The mode owns the geometry; the **Effects** selector adds a compatible presentation effect. `None` is
+the safe default. Effects use the current display levels or captured display-frame history; Pulse is a
+level-driven brightness effect, not beat detection. Incompatible effects fall back to None when changing
+modes. Random rotation selects only effects exposed for the selected mode.
 
-Choose a style from the **Style** selector to overlay an effect without changing the selected mode's
-geometry. `None` is the default and is always safe. Every style is derived from the current display frame or
-captured display-frame history; no style generates autonomous motion. `Pulse` and Glow are used only on
-continuous or meter-oriented renderers, while Trail, Scanline, and Precision are exposed only for renderers
-that implement them. Unsupported combinations show `None` rather than implying that an effect is active.
-Random rotation selects a valid complete Mode × Style × Theme combination.
+**Reference Guides** are independent of the effect. They add drawing references without changing audio
+measurement accuracy. Legacy `Precision` settings migrate to enabled guides when the independent guide
+preference has not been set. Legacy `Scanline` settings still parse for compatibility, but Scanline is
+retired from the effect picker and recommended presets.
 
 | Style            | Effect                                              |
 | ---------------- | --------------------------------------------------- |
 | `None` (default) | No overlay                                          |
 | `Pulse`          | Brightens in proportion to the current signal level |
-| `Glow`           | Adds a soft level-driven halo                       |
-| `Trail`          | Shows recent captured signal peaks or contours      |
-| `Scanline`       | Marks the current aggregate signal level            |
-| `Precision`      | Adds static analytical reference guides             |
+| `Glow` / Soft Glow | Adds a subdued level-driven halo                  |
+| `Trail`          | Adds 400 ms of fading display persistence, distinct from Peak Trace's held envelope |
+| `Outline`        | Emphasizes the active signal edge                   |
 
 <a id="themes"></a>
 
-## 🎨 Colour Themes
+## 🎨 Colour Palettes and Appearance
 
-> **Theme model:** themes affect the signal palette and the surrounding application/control/grid colours while keeping application chrome visually subordinate to the signal.
+Choose one of the 13 signal palettes without discarding a preferred light or dark workspace. The
+independent **Appearance** setting offers Palette, System, Dark, Light, and High Contrast. Palette uses
+the palette's original application appearance; the other choices adapt signal contrast to the chosen
+surfaces. System reads the Windows appearance preference without changing it.
 
-Choose a palette from the **Theme** selector in the title bar to change bar colours immediately. Themes
-apply semantic application, control, grid, and visualization colors in addition to their signal palette.
-Application chrome remains neutral and subordinate to active signal data.
+History views use a separate ordered intensity ramp and a visible level legend. Threshold crossings
+and stereo channels use stable labels and drawing cues instead of relying only on the palette's hues.
 
 | Theme                     | Palette                                                 | Best For                                           |
 | ------------------------- | ------------------------------------------------------- | -------------------------------------------------- |
-| `ClassicSmooth` (default) | Green → yellow → orange, red peak                       | Traditional VU/spectrum look                       |
-| `Ice`                     | Blue → cyan → soft ice peak                             | Cool, calm analysis                                |
-| `Sunset`                  | Amber → coral → pale gold peak                          | Warm, restrained analysis                          |
+| `ClassicSmooth` (default) | Green → amber → orange → pale peach                     | Traditional spectrum display                       |
+| `Ice`                     | Blue → cyan → pale ice                                  | Cool, calm analysis                                |
+| `Sunset`                  | Copper → amber → cream                                 | Warm spectrum display                              |
 | `MonoCyan`                | Blue-cyan lightness ladder                              | Clean technical display                            |
-| `Synthwave`               | Violet → magenta → softened cyan peak                   | Restrained retro character                         |
-| `Aurora`                  | Emerald → cyan → pale lavender peak                     | Calm luminous analysis                             |
-| `Obsidian Gold`           | Warm gold → pale gold peak                              | Premium warm display                               |
-| `Midnight Prism`          | Violet → cyan → soft ice peak                           | Controlled nocturnal contrast                      |
-| `Emerald Noir`            | Emerald → jade → mint peak                              | Refined green-on-neutral display                   |
-| `Crimson Velvet`          | Crimson → rose → blush peak                             | Rich, controlled warm contrast                     |
-| `Studio`                  | Teal → blue on graphite/slate chrome                    | Professional reference theme                       |
+| `Synthwave`               | Violet → magenta → pale cyan                            | Retro colour accents                               |
+| `Aurora`                  | Emerald → cyan → pale lavender                          | Cool luminous display                              |
+| `Obsidian Gold`           | Warm gold → pale gold                                  | Gold accents on dark surfaces                      |
+| `Midnight Prism`          | Violet → cyan → pale ice                                | Cool colours on dark surfaces                      |
+| `Emerald Noir`            | Green → jade → pale lime                                | Green signals on neutral surfaces                  |
+| `Crimson Velvet`          | Dusty rose → peach → cream                              | Warm signal colours                                |
+| `Studio`                  | Teal → blue → pale blue on graphite/slate chrome         | Neutral analytical workspace                       |
 | `Platinum Light`          | Contrasting signal palette on light instrument surfaces | Bright workspaces and readable light controls      |
-| `High Contrast`           | High-contrast instrument colors and focus states        | Accessible monitoring and clear control boundaries |
+| `High Contrast`           | Ordered high-visibility signals, black surfaces and clear focus | High-visibility monitoring and clear control boundaries |
 
 ---
 
@@ -311,7 +321,9 @@ Application chrome remains neutral and subordinate to active signal data.
 `Spectrum\App.config` supplies the initial mode, style, and theme at build time and is copied to `Spectrum.exe.config` beside the executable. For an already-built distribution, edit that deployed configuration before starting Spectrum:
 
 Runtime selections apply immediately for the current session and do not modify `App.config`.
-The selected mode, style, and theme, Fixed/Random choice, and random interval are saved in the current Windows user's application settings; saved choices take precedence over `App.config` on later launches. Legacy `Mode=Pulse` migrates to `Bricks` with `None`, `Mode=Glow` migrates to `Spectrum` plus `Glow`, and retired `Center`, `Mirror`, `Note Map`, and `Ambient Particles` values migrate safely to retained modes.
+The selected mode, effect, palette, independent Guides and Appearance choices, Fixed/Random choice, and random interval are saved in the current Windows user's application settings; saved choices take precedence over `App.config` on later launches. The band-change range (±6, ±12, ±24, or ±72 dB; default ±12), monitoring threshold (−12, −18, −24, −36, or −48 dBFS; default −24), optional octave values and effect intensity (Subtle, Standard, or Strong) apply for the current session. Pin and display Freeze also apply for the current session. Waterfall resolution selects the corresponding fine or coarse mode, so it follows the saved mode selection.
+
+Legacy `Mode=Pulse` migrates to `Bricks` with `None`, `Mode=Glow` migrates to `Spectrum` plus `Glow`, and retired `Center`, `Mirror`, `Note Map`, and `Ambient Particles` values migrate safely to retained modes. An unset independent Guides preference inherits legacy `Style=Precision`; an explicit Guides choice takes precedence. Scanline remains a recognized legacy token but is not offered in the Effects selector or random rotation.
 
 ```xml
 <appSettings>
@@ -371,6 +383,8 @@ dotnet test .\Spectrum.Tests\bin\Release\net48\Spectrum.Tests.dll
 ```
 
 Additional regressions cover full-scale packed capture levels, elapsed-time peak hold, invalid sample-history writes, FFT window validation, mode sorting and vector icons, settings persistence, accessible chrome, and capture recovery. The historical results below apply only to their stated artifacts and do not certify unexecuted environments.
+
+The **2026-10-17 complete GUI revision** passed **921/921 x86 cases**, zero failed/skipped, after a clean Release rebuild. Coverage includes all 21 modes with matched silent/quiet/stereo input, independent Guides migration, legacy identifiers, focused-selector shortcuts, frozen display timers and resume baselines, ordered history legends, adjustable delta and threshold references, waveform axes, octave values, stable semantic colors, nine preset previews, PNG serialization, native meter frames and handle recreation, radial text ownership at 96/144/192 DPI, composite axes, compact toolbar overflow, and repeated native menu activation/focus changes. All 21 modes met the existing **16.667 ms mean direct-drawing target at 1920×1080** on the verification machine; this measures direct painting, not compositor FPS or an every-frame deadline. Populated Waterfall and 20-second Dynamics History views were also inspected with live stereo capture. Audio capture and DSP implementations were unchanged.
 
 The previously verified **2026-10-14 1200 x 480 / 12-file Release** passed **751/751 x86 cases**, zero failed/skipped, retaining all 729 preceding names and adding 22 default-window, responsive-layout, working-area and packaging cases. For that artifact, clean, seeded legacy-output migration and repeated already-clean builds passed; all twelve distribution hashes remained identical. This retained result is artifact-specific, separate from earlier releases, and is not a claim that the latest source has been retested.
 
@@ -515,10 +529,12 @@ Radial, time-domain, signed-change and grouped-octave views retain their own app
 
 > Common questions about high-frequency content and low-frequency response timing.
 
-**The top bars are empty or much lower on some songs. Is something broken?**
+### The top bars are empty or much lower on some songs. Is something broken?
+
 Not necessarily. Lossy encoders may remove high-frequency content, so bars above a recording's cutoff can correctly remain empty. Source sample rate and Nyquist also limit represented frequencies. Deterministic broadband-noise and tone tests validate the band mapping; music alone is not a numerical calibration reference.
 
-**Why do bass bars move later than cymbals?**
+### Why do bass bars move later than cymbals?
+
 Resolving bass needs a longer analysis window (≈341 ms below ~280 Hz versus ≈85 ms above ~560 Hz), so bass
 bars trail treble bars by roughly 0.1 s. This is the time/frequency trade-off of any FFT analyzer.
 
@@ -534,24 +550,14 @@ bars trail treble bars by roughly 0.1 s. This is the time/frequency trade-off of
 
 ---
 
-<div align="center" markdown="1">
-
-### 🎚️ Spectrum
-
-**Windows Audio Spectrum Visualizer · .NET Framework 4.8 · WASAPI Loopback**
-
-</div>
-
----
-
 ## Documentation links
 
 [Read all Spectrum Audio Analyzer guides online](https://gcfernando.github.io/spectrum-analyzer/documentation/) · [Project overview](https://gcfernando.github.io/spectrum-analyzer/) · [All developer projects](https://gcfernando.github.io/gcfernando/projects/)
 
 ### Verification and redistribution limitations
 
-Spectrum provides professional audio visualization through measured frequency-band displays, PCM views, and real-time FFT analysis. Numerical and runtime evidence, including unsuccessful or unexecuted checks, is recorded in the reports above rather than inferred from appearance.
+Spectrum provides measured frequency-band displays, PCM views, and FFT analysis. The dated verification results above describe the tested artifacts and conditions; screenshots demonstrate presentation rather than numerical calibration.
 
 Use the complete `Spectrum\bin\Release` output folder; the included native BASS libraries are x86, and an x64-named solution configuration is not an x64-native distribution. .NET Framework 4.8 and Windows remain required. WASAPI loopback observes the selected endpoint's combined output, not an isolated Spotify session; exclusive/protected streams may not be accessible.
 
-Bundled third-party binaries require the owner's redistribution/license authorization and appropriate notices before a production release. This checkout does not establish that authorization. No search-ranking outcome, universal 60 FPS performance, prolonged stability, or Spotify validation is implied by this README.
+Bundled third-party binaries require the owner's redistribution/license authorization and appropriate notices before a production release. This checkout does not establish that authorization. Performance and compatibility remain subject to the tested conditions described above.

@@ -33,7 +33,9 @@ public enum AdvancedVisualizationMode
     StereoSpectrum = 16,
     DynamicsHistory = 17,
     SpectralHistory = 18,
-    AdvancedSpectralBalance = 19
+    AdvancedSpectralBalance = 19,
+    Overview = 20,
+    StereoCompare = 21
 }
 
 // 83-band renderer fed copied analyzer frames on the UI thread; painting only shows data, it never measures anything
@@ -96,6 +98,9 @@ public sealed class AdvancedVisualizationControl : Control
     private readonly int[] _balanceLabelTenths = new int[3];
     private readonly AudioVisualizationData _audio = new();
     private readonly string[] _audioLabels = { "—", "—", "—", "—" };
+    private readonly string[] _audioShortLabels = { "—", "—", "—", "—" };
+    private readonly string[] _waveTimeLabels = new string[5];
+    private readonly string[] _waveAmplitudeLabels = new string[5];
     private readonly double[] _audioDb = new double[4];
     private readonly int[] _audioLabelTenths = { int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue };
     private int _captionAudioFrames;
@@ -103,6 +108,7 @@ public sealed class AdvancedVisualizationControl : Control
     private bool _captionStereo;
     private int _captionWaveCount;
     private int _captionWaveRate;
+    private bool _captionWaveStereo;
     private double _captionWaveRange;
     private string _audioCaption = "PCM samples not supplied";
     private string _waveCaption = "PCM samples not supplied";
@@ -124,6 +130,7 @@ public sealed class AdvancedVisualizationControl : Control
     private int _waveStart;
     private int _waveDisplayCount;
     private int _historySpanTenths = -1;
+    private string _historyOldestLabel = "Oldest received";
     private int _captionFrames;
     private AdvancedVisualizationMode _captionHistoryMode = (AdvancedVisualizationMode)(-1);
     private readonly int[] _noteByBand = new int[BandCount];
@@ -193,6 +200,89 @@ public sealed class AdvancedVisualizationControl : Control
     private BarColorTheme _theme;
     private BandPlan _bandPlan;
     private VisualStyle _style;
+    private bool _showGuides;
+    private bool _displayFrozen;
+    private bool _resumeSpectrum;
+    private int _deltaRangeDb = 12;
+    private string _deltaCaption = "Display-level change • ±12 dB view • contrast caps exceed range • quantized levels";
+    private string _deltaRiseLabel = "+12 dB · RISE";
+    private string _deltaFallLabel = "−12 dB · FALL";
+    private Color _analyticalLow, _analyticalHigh, _riseColor, _fallColor;
+    private Color _thresholdBelowColor, _thresholdAboveColor, _leftChannelColor, _rightChannelColor;
+    private readonly Color[] _balanceColors = new Color[3];
+    private int _thresholdDb = -24;
+    private byte _thresholdByte = 170;
+    private string _thresholdCaption = "Threshold −24 dBFS • filled caps = at/above • quantized levels";
+    private string _thresholdBelowLabel = "Below −24 dBFS";
+    private string _thresholdAboveLabel = "At/above −24 dBFS · capped";
+    private bool _showOctaveValues;
+    internal int ThresholdDb
+    {
+        get => _thresholdDb;
+        set
+        {
+            if (value != -12 && value != -18 && value != -24 && value != -36 && value != -48)
+                throw new ArgumentOutOfRangeException(nameof(value));
+            if (_thresholdDb == value) return;
+            _thresholdDb = value;
+            _thresholdByte = LevelScale.ToDisplayByte(value);
+            _thresholdCaption = "Threshold " + value + " dBFS • filled caps = at/above • quantized levels";
+            _thresholdBelowLabel = "Below " + value + " dBFS";
+            _thresholdAboveLabel = "At/above " + value + " dBFS · capped";
+            Invalidate();
+        }
+    }
+    internal bool ShowOctaveValues
+    {
+        get => _showOctaveValues;
+        set { if (_showOctaveValues == value) return; _showOctaveValues = value; Invalidate(); }
+    }
+    internal RectangleF OctaveSpectrumPlotBounds { get; private set; }
+    internal RectangleF WaveformPlotBounds { get; private set; }
+    internal RectangleF RadialLeftKeyBounds { get; private set; }
+    internal RectangleF RadialRightReadoutBounds { get; private set; }
+    private string _radialStrongest = "No band above display floor";
+    private int _radialStrongestBand = -1, _radialStrongestLevel = -1;
+    internal int DeltaRangeDb
+    {
+        get => _deltaRangeDb;
+        set
+        {
+            if (value != 6 && value != 12 && value != 24 && value != 72) throw new ArgumentOutOfRangeException(nameof(value));
+            if (_deltaRangeDb == value) return;
+            _deltaRangeDb = value;
+            _deltaCaption = "Display-level change • ±" + value + " dB view • contrast caps exceed range • quantized levels";
+            _deltaRiseLabel = "+" + value + " dB · RISE";
+            _deltaFallLabel = "−" + value + " dB · FALL";
+            Invalidate();
+        }
+    }
+    private float _effectStrength = 0.6f;
+    internal float EffectStrength
+    {
+        get => _effectStrength;
+        set { _effectStrength = Math.Max(0, Math.Min(1, float.IsNaN(value) ? 0.6f : value)); Invalidate(); }
+    }
+    private int _selectedMatrixBand = -1;
+    private string _selectedMatrixCaption;
+    internal bool ShowGuides
+    {
+        get => _showGuides;
+        set { if (_showGuides == value) return; _showGuides = value; Invalidate(); }
+    }
+    private bool GuidesVisible => ShowGuides || _style == VisualStyle.Precision;
+    internal bool DisplayFrozen
+    {
+        get => _displayFrozen;
+        set
+        {
+            if (_displayFrozen == value) return;
+            _displayFrozen = value;
+            _lastFrameTick = _sevenLastTick = 0;
+            if (value) _sevenTimer.Stop();
+            else { _resumeSpectrum = true; _sevenTimer.Start(); }
+        }
+    }
     private float _paintFontHeight;
     private Font _historyMetricsFont;
     private float _historyMetricsDpi;
@@ -204,7 +294,8 @@ public sealed class AdvancedVisualizationControl : Control
         SetStyle(ControlStyles.UserPaint |
                  ControlStyles.AllPaintingInWmPaint |
                  ControlStyles.OptimizedDoubleBuffer |
-                 ControlStyles.ResizeRedraw, true);
+                 ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+        TabStop = true;
 
         _history = new byte[DefaultHistoryFrames * BandCount];
         _historyTicks = new long[DefaultHistoryFrames];
@@ -221,7 +312,7 @@ public sealed class AdvancedVisualizationControl : Control
         _sevenTimer = new System.Windows.Forms.Timer { Interval = 16 };
         _sevenTimer.Tick += (s, e) =>
         {
-            if (!Visible || Mode != AdvancedVisualizationMode.AdvancedSpectralBalance || !_sevenHasData) return;
+            if (DisplayFrozen || !Visible || Mode != AdvancedVisualizationMode.AdvancedSpectralBalance || !_sevenHasData) return;
             UpdateSevenBandBallistics();
             Invalidate();
         };
@@ -338,6 +429,8 @@ public sealed class AdvancedVisualizationControl : Control
             return;
 
         _bandPlan = plan;
+        _selectedMatrixBand = -1;
+        _selectedMatrixCaption = null;
         BuildNoteMap(plan);
         for (var band = 0; band < BandCount; band++)
         {
@@ -433,20 +526,29 @@ public sealed class AdvancedVisualizationControl : Control
     {
         var ui = theme.Ui;
         BackColor = ui.VisualizationSurface;
+        _analyticalLow = BarColorThemes.EnsureContrast(theme.Low, BackColor);
+        _analyticalHigh = BarColorThemes.EnsureContrast(theme.High, BackColor);
+        _riseColor = BarColorThemes.EnsureContrast(Color.FromArgb(40, 165, 184), BackColor);
+        _fallColor = BarColorThemes.EnsureContrast(Color.FromArgb(211, 125, 56), BackColor);
+        _thresholdBelowColor = BarColorThemes.MonitoringBelow(ui);
+        _thresholdAboveColor = BarColorThemes.MonitoringAbove(ui);
+        _leftChannelColor = BarColorThemes.ChannelLeft(ui);
+        _rightChannelColor = BarColorThemes.ChannelRight(ui);
+        for (var group = 0; group < 3; group++) _balanceColors[group] = BarColorThemes.BalanceGroup(group, ui);
         ForeColor = ui.SecondaryText;
         _gridPen.Color = Color.FromArgb(88, ui.Grid);
         _majorGridPen.Color = Color.FromArgb(142, ui.MajorGrid);
         _framePen.Color = Color.FromArgb(180, ui.Frame);
-        _linePen.Color = theme.High;
+        _linePen.Color = _analyticalHigh;
         _contourFillBrush.Color = Color.FromArgb(62, theme.Mid);
         _textBrush.Color = ui.SecondaryText;
         _primaryTextBrush.Color = ui.PrimaryText;
-        _rmsHistoryPen.Color = theme.Low;
+        _rmsHistoryPen.Color = _analyticalLow;
         _peakHistoryPen.Color = ui.PrimaryText;
         _surfaceBrush.Color = ui.RaisedSurface;
         _peakPen.Color = ui.PrimaryText;
         _precisionPen.Color = Color.FromArgb(180, ui.MajorGrid);
-        _scanPen.Color = Color.FromArgb(72, theme.High);
+        _scanPen.Color = Color.FromArgb(42, theme.High);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -526,6 +628,12 @@ public sealed class AdvancedVisualizationControl : Control
                 case AdvancedVisualizationMode.SpectralHistory:
                     PaintSpectralHistory(graphics, width, height);
                     break;
+                case AdvancedVisualizationMode.Overview:
+                    PaintOverview(graphics, width, height);
+                    break;
+                case AdvancedVisualizationMode.StereoCompare:
+                    PaintStereoCompare(graphics, width, height);
+                    break;
             }
 
             PaintStyleOverlay(graphics, width, height);
@@ -600,6 +708,7 @@ public sealed class AdvancedVisualizationControl : Control
 
     private void PaintRadialSpectrum(Graphics graphics, int width, int height)
     {
+        RadialLeftKeyBounds = RadialRightReadoutBounds = RectangleF.Empty;
         EnsureRadialLayout(graphics, width, height);
         if (_radialRadius <= 0) return;
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -608,13 +717,13 @@ public sealed class AdvancedVisualizationControl : Control
         var radius = _radialRadius;
         var innerRadius = radius * 0.20f;
         var span = radius - innerRadius;
-        var radialGuides = _style == VisualStyle.Precision ? 6 : 2;
+        var radialGuides = GuidesVisible ? 6 : 2;
         for (var guide = 0; guide <= radialGuides; guide++)
         {
             var r = innerRadius + span * guide / radialGuides;
             graphics.DrawEllipse(_majorGridPen, centerX - r, centerY - r, 2 * r, 2 * r);
         }
-        var penWidth = Math.Max(1f, Math.Min(5f, (float)(2 * Math.PI * radius / BandCount) * 0.65f));
+        var penWidth = _style == VisualStyle.Outline ? 1f : Math.Max(1f, Math.Min(5f, (float)(2 * Math.PI * radius / BandCount) * 0.65f));
         if (_radialPenWidth != penWidth)
         {
             _radialPenWidth = penWidth;
@@ -628,6 +737,13 @@ public sealed class AdvancedVisualizationControl : Control
             if (_spectrum[band] > 0)
             {
                 var pen = _radialPens[_spectrum[band]];
+                if (_style == VisualStyle.Glow)
+                {
+                    _linePen.Color = Color.FromArgb((int)(60 * EffectStrength), pen.Color);
+                    _linePen.Width = penWidth + 4;
+                    graphics.DrawLine(_linePen, centerX + direction.X * innerRadius, centerY + direction.Y * innerRadius,
+                        centerX + direction.X * end, centerY + direction.Y * end);
+                }
                 graphics.DrawLine(pen, centerX + direction.X * innerRadius, centerY + direction.Y * innerRadius,
                     centerX + direction.X * end, centerY + direction.Y * end);
             }
@@ -650,6 +766,47 @@ public sealed class AdvancedVisualizationControl : Control
             for (var index = 0; index < s_radialLabelBands.Length; index++)
                 graphics.DrawString(_bandLabels[s_radialLabelBands[index]], Font, _textBrush,
                     _radialLabelBounds[index], _centeredText);
+        }
+        if (GuidesVisible && span >= _paintFontHeight * 3)
+        {
+            var stride = span / 6 >= _paintFontHeight + 2 ? 1 : 2;
+            for (var guide = 0; guide <= 6; guide += stride)
+            {
+                var r = innerRadius + span * guide / 6;
+                graphics.DrawString(s_referenceDbLabels[guide], Font, _primaryTextBrush,
+                    centerX + 5, centerY - r - _paintFontHeight / 2);
+            }
+        }
+        var leftTextEdge = centerX - radius;
+        var rightTextEdge = centerX + radius;
+        if (_radialLabelsVisible)
+            foreach (var label in _radialLabelBounds)
+            {
+                leftTextEdge = Math.Min(leftTextEdge, label.Left);
+                rightTextEdge = Math.Max(rightTextEdge, label.Right);
+            }
+        var sideWidth = leftTextEdge - 28;
+        var sideRightX = rightTextEdge + 20;
+        var sideRightWidth = width - sideRightX - 12;
+        if (width >= 700 && height >= 160 && sideWidth >= 150 && sideRightWidth >= 150)
+        {
+            EnsureAnalysisFonts(true);
+            var line = _analysisBodyFont.GetHeight(graphics) + 7;
+            var y = Math.Max(35, centerY - line * 2);
+            RadialLeftKeyBounds = new RectangleF(12, y, sideWidth - 12, line * 3);
+            RadialRightReadoutBounds = new RectangleF(sideRightX, y, sideRightWidth, line * 4);
+            graphics.DrawString("DISPLAY KEY", _analysisTitleFont, _primaryTextBrush,
+                new RectangleF(12, y, sideWidth - 12, line), _singleLineText);
+            DrawSignalLegend(graphics, 12, y + line, sideWidth - 12, line, "Current band level", _analyticalLow, false);
+            DrawSignalLegend(graphics, 12, y + line * 2, sideWidth - 12, line, "Held peaks · 300 ms", _theme.Ui.PrimaryText, true);
+            var rightX = sideRightX;
+            var rightWidth = sideRightWidth;
+            graphics.DrawString("STRONGEST DISPLAY BAND", _analysisTitleFont, _primaryTextBrush,
+                new RectangleF(rightX, y, rightWidth, line), _singleLineText);
+            graphics.DrawString(_radialStrongest, _analysisBodyFont, _textBrush,
+                new RectangleF(rightX, y + line, rightWidth, line * 2), _singleLineText);
+            graphics.DrawString("Clockwise · radius ≤−72 … 0 dBFS", _analysisBodyFont, _textBrush,
+                new RectangleF(rightX, y + line * 3, rightWidth, line), _singleLineText);
         }
     }
 
@@ -757,10 +914,10 @@ public sealed class AdvancedVisualizationControl : Control
             _contourPath.CloseFigure();
 
             _contourFillBrush.Color = Color.FromArgb(36, _theme.Low);
-            graphics.FillPath(_contourFillBrush, _contourPath);
+            if (_style != VisualStyle.Outline) graphics.FillPath(_contourFillBrush, _contourPath);
 
             _linePen.Width = Math.Max(1f, Math.Min(2.5f, height / 100f));
-            _linePen.Color = _theme.Low;
+            _linePen.Color = _analyticalLow;
             _contourPath.Reset();
             AppendPlotLines();
             graphics.DrawPath(_linePen, _contourPath);
@@ -822,14 +979,35 @@ public sealed class AdvancedVisualizationControl : Control
     private void PaintPeakTrace(Graphics graphics, int width, int height)
     {
         DrawContourGrid(graphics, width, height, out var top, out var baseline);
-        DrawSpectrumLine(graphics, width, top, baseline, false, _theme.Low, 2f);
+        DrawSpectrumLine(graphics, width, top, baseline, false, _analyticalLow, 2f);
         DrawCaption(graphics, width, "Current spectrum • dashed 300 ms peak hold • −72 … 0 dBFS");
+        if (width >= 600 && height >= 80)
+        {
+            var h = GetCaptionHeight(width, height) - 4;
+            _thresholdBrush.Color = BackColor;
+            graphics.FillRectangle(_thresholdBrush, 3, 2, width - 6, h);
+            DrawSignalLegend(graphics, 8, 2, width * 0.29f, h, "Live spectrum", _analyticalLow, false);
+            DrawSignalLegend(graphics, width * 0.32f, 2, width * 0.39f, h, "Held envelope · 300 ms", _theme.Ui.PrimaryText, true);
+            graphics.DrawString("−72 … 0 dBFS", Font, _textBrush, new RectangleF(width * 0.74f, 2, width * 0.25f, h), _centeredText);
+        }
+    }
+
+    private void DrawSignalLegend(Graphics graphics, float x, float y, float width, float height,
+        string text, Color color, bool dashed)
+    {
+        if (width < 30 || height < 1) return;
+        _linePen.Color = color;
+        _linePen.Width = 2;
+        _linePen.DashStyle = dashed ? DashStyle.Dash : DashStyle.Solid;
+        graphics.DrawLine(_linePen, x, y + height / 2, x + 22, y + height / 2);
+        graphics.DrawString(text, Font, _textBrush, new RectangleF(x + 27, y, width - 27, height), _centeredText);
+        _linePen.DashStyle = DashStyle.Solid;
     }
 
     private void PaintThresholdMonitor(Graphics graphics, int width, int height)
     {
-        const byte threshold = 170;
-        DrawContourGrid(graphics, width, height, out var top, out var baseline);
+        var threshold = _thresholdByte;
+        GetCurvePlotBounds(width, height, out var top, out var baseline);
         var plotHeight = Math.Max(1f, baseline - top);
         var thresholdY = (int)Math.Round(top + plotHeight * (1f - (threshold / 255f)));
         for (var band = 0; band < BandCount; band++)
@@ -837,17 +1015,47 @@ public sealed class AdvancedVisualizationControl : Control
             var level = _spectrum[band];
             if (level == 0)
                 continue;
-            var color = level >= threshold ? _theme.High : level >= 96 ? _theme.Mid : _theme.Low;
+            var color = level >= threshold ? _thresholdAboveColor : _thresholdBelowColor;
             var cellHeight = Math.Max(1f, plotHeight * level / 255f);
             _thresholdBrush.Color = color;
             var x = (float)SpectrumAxis.Position(_bandPlan[band].LowerHz) * (width - 1);
             var right = (float)SpectrumAxis.Position(_bandPlan[band].UpperHz) * (width - 1);
             if (right > x)
-                graphics.FillRectangle(_thresholdBrush, x, baseline - cellHeight, Math.Max(0.5f, right - x - 0.5f), cellHeight);
+            {
+                if (_style == VisualStyle.Outline)
+                {
+                    _linePen.Color = BarColorThemes.EnsureContrast(color, BackColor);
+                    _linePen.Width = 1;
+                    graphics.DrawRectangle(_linePen, x, baseline - cellHeight, Math.Max(0.5f, right - x - 0.5f), cellHeight);
+                }
+                else graphics.FillRectangle(_thresholdBrush, x, baseline - cellHeight, Math.Max(0.5f, right - x - 0.5f), cellHeight);
+            }
+            if (level >= threshold && right > x)
+            {
+                _thresholdBrush.Color = _theme.Ui.PrimaryText;
+                graphics.FillRectangle(_thresholdBrush, x, baseline - cellHeight, Math.Max(0.5f, right - x - 0.5f), 2f);
+            }
         }
 
-        graphics.DrawLine(_majorGridPen, 0, thresholdY, width, thresholdY);
-        DrawCaption(graphics, width, "Threshold −24 dBFS • quantized display levels");
+        _peakPen.Color = _theme.Ui.PrimaryText;
+        _peakPen.DashStyle = DashStyle.Dash;
+        var previousWidth = _peakPen.Width;
+        _peakPen.Width = 3f;
+        graphics.DrawLine(_peakPen, 0, thresholdY, width, thresholdY);
+        _peakPen.Width = previousWidth;
+        // The threshold coincides with a calibrated dB row. Retain that reference
+        // on top of the broader contrast rule, including when a band crosses it.
+        DrawSpectrumGrid(graphics, 0, width - 1, top, baseline);
+        DrawCaption(graphics, width, _thresholdCaption);
+        if (width >= 480 && height >= 80)
+        {
+            var h = GetCaptionHeight(width, height) - 4;
+            _thresholdBrush.Color = BackColor;
+            graphics.FillRectangle(_thresholdBrush, 3, 2, width - 6, h);
+            DrawSignalLegend(graphics, 8, 2, width * 0.27f, h, _thresholdBelowLabel, _thresholdBelowColor, false);
+            DrawSignalLegend(graphics, width * 0.29f, 2, width * 0.41f, h, _thresholdAboveLabel, _thresholdAboveColor, false);
+            graphics.DrawString("Quantized dBFS", Font, _textBrush, new RectangleF(width * 0.72f, 2, width * 0.27f, h), _centeredText);
+        }
     }
 
     private void PaintBandMatrix(Graphics graphics, int width, int height)
@@ -857,7 +1065,7 @@ public sealed class AdvancedVisualizationControl : Control
         if (_matrixHeaderHeight > 0)
         {
             graphics.DrawString("BAND MATRIX", _matrixValueFont, _primaryTextBrush, _matrixPadding, 3 * scale);
-            graphics.DrawString("83 log bands • left → right, then down", _matrixFrequencyFont, _textBrush,
+            graphics.DrawString(_selectedMatrixCaption ?? "BASS <250 Hz  •  MID 250 Hz–4 kHz  •  HIGH ≥4 kHz  •  click to pin; arrows select", _matrixFrequencyFont, _textBrush,
                 new RectangleF(_matrixPadding, 3 * scale + _matrixValueHeight, width - 2 * _matrixPadding, _matrixFrequencyHeight), _centeredText);
             if (width >= 620 * scale)
                 graphics.DrawString("DISPLAY RANGE • −72 … 0 dBFS", _matrixFrequencyFont, _textBrush,
@@ -881,6 +1089,16 @@ public sealed class AdvancedVisualizationControl : Control
                 graphics.DrawPath(_gridPen, path);
             }
             else graphics.FillRectangle(brush, rect);
+            var hz = _bandPlan[band].CenterHz;
+            _thresholdBrush.Color = _balanceColors[hz < 250 ? 0 : hz < 4000 ? 1 : 2];
+            graphics.FillRectangle(_thresholdBrush, rect.X + 1, rect.Y + 1,
+                Math.Min(3 * scale, Math.Max(0.1f, rect.Width - 2)), Math.Max(0.1f, rect.Height - 2));
+            if (band == _selectedMatrixBand)
+            {
+                _linePen.Color = _theme.Ui.Focus;
+                _linePen.Width = 2;
+                graphics.DrawRectangle(_linePen, rect.X, rect.Y, rect.Width, rect.Height);
+            }
             if (!fullLabels && !frequencyOnly) continue;
 
             var innerX = rect.X + 5 * scale;
@@ -896,12 +1114,45 @@ public sealed class AdvancedVisualizationControl : Control
             graphics.FillRectangle(_surfaceBrush, innerX, meterY, innerWidth, 3 * scale);
             if (level > 0)
                 graphics.FillRectangle(_levelBrushes[level], innerX, meterY, Math.Max(scale, innerWidth * level / 255f), 3 * scale);
-            if (_style == VisualStyle.Precision)
+            if (GuidesVisible)
                 for (var reference = 1; reference < 3; reference++)
                     graphics.DrawLine(_precisionPen, innerX + innerWidth * reference / 3, meterY - scale,
                         innerX + innerWidth * reference / 3, meterY + 4 * scale);
         }
         graphics.SmoothingMode = previousSmoothing;
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        if (Mode != AdvancedVisualizationMode.BandMatrix || e.Button != MouseButtons.Left) return;
+        Focus();
+        for (var band = 0; band < BandCount; band++)
+            if (_matrixCards[band].Contains(e.Location)) { SelectMatrixBand(band); break; }
+    }
+
+    protected override bool IsInputKey(Keys keyData) => Mode == AdvancedVisualizationMode.BandMatrix &&
+        (keyData & Keys.KeyCode) is Keys.Left or Keys.Right or Keys.Up or Keys.Down || base.IsInputKey(keyData);
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (Mode == AdvancedVisualizationMode.BandMatrix)
+        {
+            var step = e.KeyCode == Keys.Left ? -1 : e.KeyCode == Keys.Right ? 1
+                : e.KeyCode == Keys.Up ? -Math.Max(1, _matrixColumns) : e.KeyCode == Keys.Down ? Math.Max(1, _matrixColumns) : 0;
+            if (step != 0) { SelectMatrixBand(Math.Max(0, Math.Min(BandCount - 1, _selectedMatrixBand + step))); e.Handled = true; }
+        }
+        base.OnKeyDown(e);
+    }
+
+    private void SelectMatrixBand(int band)
+    {
+        _selectedMatrixBand = band;
+        _selectedMatrixCaption = "PINNED  " + _bandLabels[band] + "  ·  " + s_matrixValueLabels[_spectrum[band]] +
+            "  ·  click again to refresh";
+        AccessibleDescription = _selectedMatrixCaption;
+        AccessibilityNotifyClients(AccessibleEvents.NameChange, -1);
+        Invalidate();
     }
 
     private void EnsureMatrixLayout(Graphics graphics, int width, int height)
@@ -972,29 +1223,49 @@ public sealed class AdvancedVisualizationControl : Control
 
     private void PaintOctaveSpectrum(Graphics graphics, int width, int height)
     {
-        var top = height >= 80 ? Math.Max(24f, GetCaptionHeight(width, height) + 2f) : 2f;
-        var baseline = Math.Max(top + 1, height - (height >= 80 ? 23f : 2f));
+        EnsureAnalysisFonts(true);
+        var scale = graphics.DpiY / 96f;
+        var lineHeight = _analysisBodyFont.GetHeight(graphics);
+        var labeled = width >= 400 * scale && height >= 120 * scale;
+        var values = ShowOctaveValues && labeled && height >= lineHeight * 6;
+        var top = height >= 80 ? GetCaptionHeight(width, height) + 3f * scale : 2f;
+        if (values) top += lineHeight + 4 * scale;
+        var baseline = Math.Max(top + 1, height - (labeled ? lineHeight + 6 * scale : height >= 80 ? 23f : 2f));
         var plotHeight = Math.Max(1, baseline - top);
-        var groupWidth = width / (float)OctaveCount;
+        var left = labeled ? Math.Max(42 * scale, graphics.MeasureString("−72", _analysisBodyFont).Width + 9 * scale) : 0;
+        var right = Math.Max(left + 1, width - 3 * scale);
+        OctaveSpectrumPlotBounds = RectangleF.FromLTRB(left, top, right, baseline);
+        var groupWidth = (right - left) / OctaveCount;
+        if (labeled)
+            for (var guide = 0; guide <= 6; guide++)
+            {
+                var y = baseline - plotHeight * guide / 6f;
+                graphics.DrawLine(guide % 2 == 0 ? _majorGridPen : _gridPen, left, y, right, y);
+                if (guide % 2 == 0 || plotHeight >= lineHeight * 12)
+                    graphics.DrawString(s_referenceDbLabels[guide], _analysisBodyFont, _textBrush,
+                        new RectangleF(0, y - lineHeight / 2, left - 5 * scale, lineHeight), _rightText);
+            }
         for (var group = 0; group < OctaveCount; group++)
         {
             var level = _octaveLevels[group];
             var barHeight = plotHeight * level / 255f;
-            var x = group * groupWidth;
+            var x = left + group * groupWidth;
             if (level > 0)
                 graphics.FillRectangle(_levelBrushes[level], x + 2, baseline - Math.Max(1, barHeight),
                     Math.Max(1, groupWidth - 4), Math.Max(1, barHeight));
-            graphics.DrawRectangle(_majorGridPen, x + 1, top, Math.Max(1, groupWidth - 2), plotHeight);
-            if (_style == VisualStyle.Precision)
+            graphics.DrawLine(_gridPen, x + 1, baseline, x + groupWidth - 1, baseline);
+            if (GuidesVisible)
                 for (var guide = 1; guide < 6; guide++)
                     graphics.DrawLine(_precisionPen, x + 1, baseline - plotHeight * guide / 6f,
                         x + groupWidth - 1, baseline - plotHeight * guide / 6f);
-            if (groupWidth >= 35 && height >= 80)
-                graphics.DrawString(groupWidth >= 100 ? s_octaveBandLabels[group] : s_octaveLowerLabels[group], Font, _textBrush,
-                    new RectangleF(x, baseline + 2, groupWidth, 20), _centeredText);
+            if (values)
+                graphics.DrawString(s_matrixValueLabels[level], _analysisBodyFont, _primaryTextBrush,
+                    new RectangleF(x, top - lineHeight - 3 * scale, groupWidth, lineHeight), _centeredText);
+            if (groupWidth >= 28 && height >= 80)
+                graphics.DrawString(groupWidth >= 100 ? s_octaveBandLabels[group] : s_octaveLowerLabels[group], _analysisBodyFont, _textBrush,
+                    new RectangleF(x, baseline + 2 * scale, groupWidth, lineHeight + 3 * scale), _centeredText);
         }
-        DrawCaption(graphics, width, width >= 1000 ? "Summed display power • octave groups by band center, Hz" :
-            "Approx. octave groups by band center • lower edges, Hz");
+        DrawCaption(graphics, width, "Approx. summed display power • octave groups by center • ≤−72 … 0 dBFS");
     }
 
     private void PaintSpectralFlux(Graphics graphics, int width, int height)
@@ -1002,7 +1273,7 @@ public sealed class AdvancedVisualizationControl : Control
         var center = height * 0.5f;
         var span = Math.Max(1, height * 0.5f - (height >= 80 ? 24 : 2));
         graphics.DrawLine(_majorGridPen, 0, center, width, center);
-        if (_style == VisualStyle.Precision)
+        if (GuidesVisible)
             for (var guide = 1; guide < 6; guide++)
             {
                 graphics.DrawLine(_precisionPen, 0, center - span * guide / 6f, width, center - span * guide / 6f);
@@ -1013,13 +1284,27 @@ public sealed class AdvancedVisualizationControl : Control
         {
             var difference = _spectrum[band] - _previousSpectrum[band];
             if (difference == 0) continue;
-            var extent = span * Math.Abs(difference) / 255f;
-            _thresholdBrush.Color = difference > 0 ? _theme.High : _theme.Low;
+            var extent = span * Math.Min(1f, Math.Abs(difference) * 72f / (255f * DeltaRangeDb));
+            _thresholdBrush.Color = difference > 0 ? _riseColor : _fallColor;
             var y = difference > 0 ? center - extent : center;
             graphics.FillRectangle(_thresholdBrush, band * columnWidth, y,
                 Math.Max(0.5f, columnWidth - 1), Math.Max(1, extent));
+            if (Math.Abs(difference) * 72f / 255f > DeltaRangeDb)
+            {
+                _thresholdBrush.Color = _theme.Ui.PrimaryText;
+                graphics.FillRectangle(_thresholdBrush, band * columnWidth,
+                    difference > 0 ? center - span : center + span - 3, Math.Max(0.5f, columnWidth - 1), 3);
+            }
         }
-        DrawCaption(graphics, width, "Display-level change • rise above center, fall below • full scale ±72 dB");
+        if (height >= 140 && width >= 320)
+        {
+            graphics.DrawString(_deltaRiseLabel, Font, _textBrush, 4, center - span);
+            graphics.DrawString("0", Font, _textBrush, 4, center - _paintFontHeight);
+            graphics.DrawString(_deltaFallLabel, Font, _textBrush, 4, center + span - _paintFontHeight);
+        }
+        else if (height >= 80 && width >= 180)
+            graphics.DrawString("0", Font, _textBrush, 4, center - _paintFontHeight);
+        DrawCaption(graphics, width, _deltaCaption);
     }
 
 
@@ -1051,8 +1336,8 @@ public sealed class AdvancedVisualizationControl : Control
         var left = labeled ? 7 * scale : 1f;
         var right = Math.Max(left + 1, width - (labeled ? _historyDbLabelWidth : 2f));
         var span = Math.Max(1, right - left);
-        var depthHeight = Math.Max(1, bottom - top) * 0.35f;
-        var signalHeight = Math.Max(1, bottom - top) * 0.60f;
+        var depthHeight = Math.Max(1, bottom - top) * 0.22f;
+        var signalHeight = Math.Max(1, bottom - top) * 0.73f;
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         for (var guide = 0; guide <= 3; guide++)
         {
@@ -1074,7 +1359,7 @@ public sealed class AdvancedVisualizationControl : Control
             var baseline = bottom - depthHeight * depth;
             var traceHeight = signalHeight * (1 - 0.32f * depth);
             var pen = _historyTracePens[slice];
-            if (_style == VisualStyle.Precision)
+            if (GuidesVisible)
                 graphics.DrawLine(_gridPen, x0, baseline, x0 + traceWidth, baseline);
             for (var band = 1; band < BandCount; band++)
             {
@@ -1106,6 +1391,7 @@ public sealed class AdvancedVisualizationControl : Control
             (_mode == AdvancedVisualizationMode.Contour || _mode == AdvancedVisualizationMode.PeakTrace ||
              _mode == AdvancedVisualizationMode.ThresholdMonitor))
         {
+            _scanPen.Color = Color.FromArgb((int)(70 * EffectStrength), _analyticalHigh);
             GetCurvePlotBounds(width, height, out var top, out var baseline);
             var y = baseline - (baseline - top) * GetAverageLevel();
             graphics.DrawLine(_scanPen, 0, y, width, y);
@@ -1222,6 +1508,7 @@ public sealed class AdvancedVisualizationControl : Control
 
     public void SetAudioSamples(float[] samples, int frames, int channels, int sampleRate)
     {
+        if (DisplayFrozen) return;
         _audio.Update(samples, frames, channels, sampleRate);
         UpdateAudioLabels();
         UpdateAnalysisLabels();
@@ -1230,6 +1517,7 @@ public sealed class AdvancedVisualizationControl : Control
 
     internal void SetAudioData(AudioVisualizationData data)
     {
+        if (DisplayFrozen) return;
         _audio.CopyFrom(data);
         UpdateSevenBandBallistics();
         UpdateAudioLabels();
@@ -1237,9 +1525,29 @@ public sealed class AdvancedVisualizationControl : Control
         Invalidate();
     }
 
+    // Deterministic still previews use an already-copied frame, not elapsed live
+    // attack/release time. Never changes measurements or the capture source.
+    internal void SettlePreviewBallistics()
+    {
+        _sevenHasData = _audio.HasSevenBand;
+        for (var band = 0; band < SevenBandAnalyzer.BandCount; band++)
+        {
+            var power = _audio.SevenBandPower[band];
+            var level = _sevenHasData && !double.IsNaN(power)
+                ? (float)(LevelScale.Normalize(LevelScale.PowerToDb(power)) * SevenBandRangeDb) : 0;
+            _sevenLevels[band] = _sevenPeaks[band] = level;
+            _sevenPeakHoldMs[band] = SevenBandPeakHoldMs;
+            _sevenLabelTenths[band] = int.MaxValue;
+        }
+        _sevenLastTick = 0;
+        UpdateSevenBandBallistics();
+        Invalidate();
+    }
+
     internal void SynchronizeSpectrum(byte[] values)
     {
         if (values == null) throw new ArgumentNullException(nameof(values));
+        if (DisplayFrozen) return;
         ResetHistory();
         SetSpectrum(values);
         Array.Copy(_spectrum, _previousSpectrum, BandCount);
@@ -1265,6 +1573,7 @@ public sealed class AdvancedVisualizationControl : Control
             if (_audioLabelTenths[i] == tenths) continue;
             _audioLabelTenths[i] = tenths;
             _audioLabels[i] = silent ? "−∞ dBFS" : _audioDb[i].ToString("0.0") + " dBFS";
+            _audioShortLabels[i] = silent ? "−∞" : _audioDb[i].ToString("0.0");
         }
         if (_captionAudioFrames != _audio.WindowFrames || _captionAudioRate != _audio.SampleRate || _captionStereo != _audio.HasStereo)
         {
@@ -1282,13 +1591,21 @@ public sealed class AdvancedVisualizationControl : Control
         for (var i = 0; i < _waveDisplayCount; i++)
             peak = Math.Max(peak, Math.Abs((double)_audio.Wave[_waveStart + i]));
         _waveRange = Math.Pow(2, Math.Ceiling(Math.Log(Math.Max(1d / 1024d, peak), 2)));
-        if (_captionWaveCount != _waveDisplayCount || _captionWaveRate != _audio.SampleRate || _captionWaveRange != _waveRange)
+        if (_captionWaveCount != _waveDisplayCount || _captionWaveRate != _audio.SampleRate || _captionWaveRange != _waveRange || _captionWaveStereo != _audio.HasStereo)
         {
             _captionWaveCount = _waveDisplayCount;
             _captionWaveRate = _audio.SampleRate;
             _captionWaveRange = _waveRange;
-            _waveCaption = "Left waveform • " + (1000d * Math.Max(0, _waveDisplayCount - 1) / _audio.SampleRate).ToString("0.00") +
+            _captionWaveStereo = _audio.HasStereo;
+            var durationMs = 1000d * Math.Max(0, _waveDisplayCount - 1) / _audio.SampleRate;
+            _waveCaption = (_audio.HasStereo ? "Front-left waveform" : "Mono waveform") + " • " + durationMs.ToString("0.00") +
                 " ms • auto range ±" + _waveRange.ToString("G4") + " FS";
+            for (var tick = 0; tick < 5; tick++)
+            {
+                _waveTimeLabels[tick] = (durationMs * tick / 4).ToString("0.##") + (tick == 4 ? " ms" : string.Empty);
+                var amplitude = _waveRange * (1 - tick / 2d);
+                _waveAmplitudeLabels[tick] = (amplitude > 0 ? "+" : string.Empty) + amplitude.ToString("G3") + " FS";
+            }
         }
     }
 
@@ -1335,6 +1652,78 @@ public sealed class AdvancedVisualizationControl : Control
             "  •  RMS dashed / sample peak solid";
     }
 
+    internal RectangleF OverviewSpectrumPlotBounds { get; private set; }
+
+    private void PaintOverview(Graphics graphics, int width, int height)
+    {
+        EnsureAnalysisFonts(true);
+        var scale = graphics.DpiY / 96f;
+        var bodyHeight = _analysisBodyFont.GetHeight(graphics);
+        var composite = width >= 400 && height >= 100;
+        var spectrumWidth = composite ? (int)(width * 0.70f) : width;
+        var subplotWidth = Math.Max(1, spectrumWidth - (composite ? 5 : 0));
+        var footer = width >= 180 * scale && height >= 100 * scale + bodyHeight
+            ? (int)Math.Ceiling(bodyHeight + 7 * scale) : 0;
+        var spectrumHeight = Math.Max(1, height - footer);
+        GetCurvePlotBounds(subplotWidth, spectrumHeight, out var top, out var bottom);
+        OverviewSpectrumPlotBounds = RectangleF.FromLTRB(0, top, Math.Max(1, subplotWidth - 1), bottom);
+        var state = graphics.Save();
+        graphics.SetClip(new Rectangle(0, 0, subplotWidth, height), CombineMode.Intersect);
+        PaintContour(graphics, subplotWidth, spectrumHeight);
+        DrawCaption(graphics, subplotWidth, "SPECTRUM · Hz · −72 … 0 dBFS");
+        if (footer > 0)
+            DrawSpectrumFrequencyLabels(graphics, OverviewSpectrumPlotBounds.Left, OverviewSpectrumPlotBounds.Right,
+                height - footer, bodyHeight + 2 * scale, subplotWidth, scale);
+        graphics.Restore(state);
+        if (!composite) return;
+        graphics.DrawLine(_majorGridPen, spectrumWidth, 4, spectrumWidth, height - 4);
+        state = graphics.Save();
+        graphics.TranslateTransform(spectrumWidth + 5, 0);
+        graphics.SetClip(new Rectangle(0, 0, width - spectrumWidth - 5, height), CombineMode.Intersect);
+        PaintStereoLevels(graphics, width - spectrumWidth - 5, height, true);
+        graphics.Restore(state);
+    }
+
+    private void PaintStereoCompare(Graphics graphics, int width, int height)
+    {
+        EnsureAnalysisFonts(true);
+        var scale = graphics.DpiY / 96f;
+        var labeled = width >= 380 * scale && height >= 130 * scale;
+        var bodyHeight = _analysisBodyFont.GetHeight(graphics);
+        var left = labeled ? 44 * scale : 2;
+        var right = Math.Max(left + 1, width - (labeled ? 22 * scale : 2));
+        var top = GetCaptionHeight(width, height) + 3 * scale;
+        var bottom = Math.Max(top + 1, height - (labeled ? bodyHeight + 8 * scale : 2));
+        DrawSpectrumGrid(graphics, left, right, top, bottom);
+        if (labeled)
+        {
+            for (var tick = 0; tick <= 6; tick++)
+                graphics.DrawString(s_referenceDbLabels[tick], _analysisBodyFont, _textBrush, 2,
+                    bottom - (bottom - top) * tick / 6f - bodyHeight / 2);
+            DrawSpectrumFrequencyLabels(graphics, left, right, bottom + 3 * scale, bodyHeight + 2 * scale, width, scale);
+        }
+        var caption = !_audio.HasChannelSpectrum ? "STEREO COMPARE • frequency data unavailable"
+            : !_audio.HasStereo ? "STEREO COMPARE • MONO solid • RIGHT unavailable"
+            : "STEREO COMPARE • LEFT solid / RIGHT dashed • full-scale-sine band power • −72 … 0 dBFS";
+        DrawCaption(graphics, width, caption);
+        if (!_audio.HasChannelSpectrum) return;
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        for (var channel = 0; channel < (_audio.HasStereo ? 2 : 1); channel++)
+        {
+            var bands = channel == 0 ? _audio.LeftSpectrum : _audio.RightSpectrum;
+            _linePen.Color = channel == 0 ? _leftChannelColor : _rightChannelColor;
+            _linePen.Width = 2 * scale;
+            _linePen.DashStyle = channel == 0 ? DashStyle.Solid : DashStyle.Dash;
+            for (var band = 0; band < BandCount; band++)
+                _plotPoints[band] = new PointF(left + (right - left) * (float)SpectrumAxis.Position(_bandPlan[band].CenterHz),
+                    bottom - (bottom - top) * bands[band] / 255f);
+            for (var band = 1; band < BandCount; band++)
+                if (bands[band] > 0 || bands[band - 1] > 0)
+                    graphics.DrawLine(_linePen, _plotPoints[band - 1], _plotPoints[band]);
+        }
+        _linePen.DashStyle = DashStyle.Solid;
+    }
+
     private void PaintStereoSpectrum(Graphics graphics, int width, int height)
     {
         EnsureAnalysisFonts(true);
@@ -1351,8 +1740,14 @@ public sealed class AdvancedVisualizationControl : Control
             graphics.MeasureString(SpectrumAxis.FrequencyLabels[15], _analysisBodyFont).Width / 2) : 2 * scale;
         var minimumPanelHeight = 12 * (bodyHeight + 2 * scale) + titleHeight + 15 * scale;
         var columns = labeled && height - header - footer < 2 * minimumPanelHeight && width >= 600 * scale;
+        // A wrapped toolbar can leave a short, wide viewport. Keep all thirteen
+        // reference ticks readable by consolidating repeated metadata, rather than
+        // shrinking the window's text or silently dropping intermediate labels.
+        var compactChrome = columns && height - header - footer - titleHeight - 15 * scale <
+            12 * (bodyHeight + 2 * scale);
+        if (compactChrome) { header = 0; footer = bodyHeight + 3 * scale; }
         var panelWidth = columns ? (width - 12 * scale) / 2 : width;
-        if (labeled)
+        if (labeled && !compactChrome)
             graphics.DrawString(width >= 620 * scale
                 ? "STEREO SPECTRUM  •  front L/R  •  full-scale-sine band power, −72 … 0 dBFS"
                 : "STEREO SPECTRUM  •  L/R  •  sine ref  •  −72 … 0 dBFS",
@@ -1365,11 +1760,16 @@ public sealed class AdvancedVisualizationControl : Control
             var panelY = header + (columns ? 0 : channel * panelHeight);
             var left = panelX + leftReserve;
             var right = Math.Max(left + 1, panelX + panelWidth - rightReserve);
-            var top = panelY + (labeled ? titleHeight + 8 * scale : compactIdentifiers ? bodyHeight + 6 * scale : 2 * scale);
-            var bottom = Math.Max(top + 1, panelY + panelHeight - 7 * scale);
+            var top = panelY + (compactChrome ? bodyHeight + 4 * scale : labeled ? titleHeight + 8 * scale : compactIdentifiers ? bodyHeight + 6 * scale : 2 * scale);
+            var bottom = Math.Max(top + 1, panelY + panelHeight - (compactChrome ? 3 : 7) * scale);
             _stereoSpectrumPlotBounds[channel] = RectangleF.FromLTRB(left, top, right, bottom);
             graphics.FillRectangle(_surfaceBrush, left, top, right - left, bottom - top);
-            if (labeled)
+            if (compactChrome)
+                graphics.DrawString(channel == 0
+                        ? _audio.Channels >= 2 ? "LEFT • full-scale sine = 0 dBFS" : "MONO • full-scale sine = 0 dBFS"
+                        : "RIGHT • full-scale sine = 0 dBFS", _analysisBodyFont, _primaryTextBrush,
+                    new RectangleF(left, panelY + 2 * scale, right - left, bodyHeight + 2 * scale), _singleLineText);
+            else if (labeled)
                 graphics.DrawString(_channelSpectrumLabels[channel], _analysisTitleFont, _primaryTextBrush,
                     new RectangleF(left, panelY + 2 * scale, right - left, titleHeight + 4 * scale), _singleLineText);
             else if (compactIdentifiers)
@@ -1397,8 +1797,9 @@ public sealed class AdvancedVisualizationControl : Control
                 continue;
             }
             var bands = channel == 0 ? _audio.LeftSpectrum : _audio.RightSpectrum;
-            _linePen.Color = channel == 0 ? _theme.Low : _theme.High;
+            _linePen.Color = channel == 0 ? _leftChannelColor : _rightChannelColor;
             _linePen.Width = 1.8f * scale;
+            _linePen.DashStyle = channel == 0 ? DashStyle.Solid : DashStyle.Dash;
             var previous = new PointF(left, bottom - (bottom - top) * bands[0] / 255f);
             for (var band = 0; band < BandCount; band++)
             {
@@ -1417,6 +1818,7 @@ public sealed class AdvancedVisualizationControl : Control
                 previous = point;
             }
         }
+        _linePen.DashStyle = DashStyle.Solid;
     }
 
     private void DrawSpectrumFrequencyLabels(Graphics graphics, float left, float right, float y, float height, int width, float scale)
@@ -1441,7 +1843,7 @@ public sealed class AdvancedVisualizationControl : Control
 
     private void DrawAnalysisGrid(Graphics graphics, float left, float right, float top, float bottom, bool labeled, float scale)
     {
-        var guides = _style == VisualStyle.Precision ? 6 : 3;
+        var guides = GuidesVisible ? 6 : 3;
         for (var guide = 0; guide <= guides; guide++)
         {
             var y = bottom - (bottom - top) * guide / guides;
@@ -1463,7 +1865,13 @@ public sealed class AdvancedVisualizationControl : Control
         var footer = labeled ? bodyHeight + 8 * scale : 0;
         var left = labeled ? 48 * scale : 2 * scale;
         var right = Math.Max(left + 1, width - 10 * scale);
-        if (labeled) graphics.DrawString(_dynamicsCaption, _analysisBodyFont, _textBrush, 8 * scale, 4 * scale);
+        if (labeled)
+        {
+            DrawSignalLegend(graphics, 8 * scale, 1, width * 0.25f, header - 1, "RMS", _rmsHistoryPen.Color, true);
+            DrawSignalLegend(graphics, width * 0.28f, 1, width * 0.30f, header - 1, "Sample peak", _peakHistoryPen.Color, false);
+            graphics.DrawString("20 s · gaps retained", _analysisBodyFont, _textBrush,
+                new RectangleF(width * 0.62f, 1, width * 0.37f, header - 1), _centeredText);
+        }
         if (_audio.ObservationCount == 0 || _audio.SampleRate < 1)
         {
             DrawUnavailable(graphics, width, height);
@@ -1480,7 +1888,8 @@ public sealed class AdvancedVisualizationControl : Control
             var top = panelY + (labeled ? titleHeight + 8 * scale : compactIdentifiers ? bodyHeight + 6 * scale : 2 * scale);
             var bottom = Math.Max(top + 1, panelY + panelHeight - 7 * scale);
             graphics.FillRectangle(_surfaceBrush, left, top, right - left, bottom - top);
-            if (labeled) graphics.DrawString(_dynamicsLabels[channel], _analysisTitleFont, _primaryTextBrush, left, panelY + 2 * scale);
+            if (labeled) graphics.DrawString(_dynamicsLabels[channel], _analysisTitleFont, _primaryTextBrush,
+                new RectangleF(left, panelY + 2 * scale, right - left, titleHeight + 3 * scale), _singleLineText);
             else if (compactIdentifiers)
                 graphics.DrawString(channel == 0 ? channels == 2 ? "LEFT" : "MONO" : "RIGHT",
                     _analysisBodyFont, _primaryTextBrush, left, panelY + 2 * scale);
@@ -1538,18 +1947,20 @@ public sealed class AdvancedVisualizationControl : Control
     private static float DynamicsLevelY(double amplitude, float top, float bottom) =>
         bottom - (bottom - top) * (float)LevelScale.Normalize(AudioVisualizationData.AmplitudeToDb(amplitude));
 
-    private void PaintStereoLevels(Graphics graphics, int width, int height)
+    private void PaintStereoLevels(Graphics graphics, int width, int height, bool fitSpectrum = false)
     {
         if (!_audio.HasSamples) { DrawUnavailable(graphics, width, height); return; }
-        EnsureAnalysisFonts();
+        EnsureAnalysisFonts(fitSpectrum);
         var scale = graphics.DpiY / 96f;
         var bodyHeight = _analysisBodyFont.GetHeight(graphics);
         var titleHeight = _analysisTitleFont.GetHeight(graphics);
-        var labeled = width >= 260 * scale && height >= Math.Max(140 * scale, bodyHeight * 8);
+        var labeled = !fitSpectrum && width >= 260 * scale && height >= Math.Max(140 * scale, bodyHeight * 8);
+        var compactLabels = !labeled && width >= 140 * scale && height >= Math.Max(100 * scale, bodyHeight * 6);
+        var showLabels = labeled || compactLabels;
         var channels = _audio.HasStereo ? 2 : 1;
         var cardWidth = width / (float)channels;
-        var top = GetCaptionHeight(width, height) + (labeled ? titleHeight + 12 * scale : 3 * scale);
-        var footerHeight = labeled ? 2 * bodyHeight + 10 * scale : 3 * scale;
+        var top = GetCaptionHeight(width, height) + (showLabels ? titleHeight + 12 * scale : 3 * scale);
+        var footerHeight = showLabels ? 2 * bodyHeight + 10 * scale : 3 * scale;
         var bottom = Math.Max(top + 1, height - footerHeight);
         var plotHeight = bottom - top;
         _peakPen.DashStyle = DashStyle.Solid;
@@ -1557,66 +1968,89 @@ public sealed class AdvancedVisualizationControl : Control
         {
             var x = channel * cardWidth + 6 * scale;
             var innerWidth = Math.Max(scale, cardWidth - 12 * scale);
-            graphics.FillRectangle(_surfaceBrush, x, top, innerWidth, plotHeight);
-            var guides = _style == VisualStyle.Precision ? 6 : 2;
+            var axisWidth = showLabels && innerWidth >= 100 * scale ? 34 * scale : 0;
+            var meterLeft = x + axisWidth;
+            var meterWidth = Math.Max(scale, innerWidth - axisWidth);
+            graphics.FillRectangle(_surfaceBrush, meterLeft, top, meterWidth, plotHeight);
+            var guides = GuidesVisible ? 6 : 2;
             for (var guide = 0; guide <= guides; guide++)
             {
                 var y = bottom - plotHeight * guide / guides;
-                graphics.DrawLine(_majorGridPen, x, y, x + innerWidth, y);
-                if (labeled && width >= 520 * scale)
+                graphics.DrawLine(_majorGridPen, meterLeft, y, x + innerWidth, y);
+                if (axisWidth > 0)
                     graphics.DrawString(s_referenceDbLabels[guide * 6 / guides], _analysisBodyFont, _textBrush, x + 2 * scale, y - bodyHeight / 2);
             }
             for (var measure = 0; measure < 2; measure++)
             {
                 var index = channel * 2 + measure;
                 var normalized = (float)LevelScale.Normalize(_audioDb[index]);
-                var barWidth = Math.Max(scale, Math.Min(34 * scale, innerWidth * 0.23f));
-                var barX = x + innerWidth * (measure == 0 ? 0.25f : 0.65f) - barWidth / 2;
+                var barWidth = Math.Max(scale, Math.Min(110 * scale, meterWidth * 0.28f));
+                var barX = meterLeft + meterWidth * (measure == 0 ? 0.25f : 0.75f) - barWidth / 2;
                 var fillHeight = plotHeight * normalized;
-                _thresholdBrush.Color = channel == 0 ? _theme.Low : _theme.High;
+                _thresholdBrush.Color = channel == 0 ? _leftChannelColor : _rightChannelColor;
                 if (normalized > 0)
                 {
                     graphics.FillRectangle(_thresholdBrush, barX, bottom - fillHeight, barWidth, fillHeight);
                     graphics.DrawLine(_peakPen, barX - 1, bottom - fillHeight, barX + barWidth + 1, bottom - fillHeight);
                 }
-                if (labeled)
+                if (showLabels)
                 {
-                    var labelX = x + innerWidth * measure / 2;
-                    graphics.DrawString(measure == 0 ? "RMS" : "Sample peak", _analysisBodyFont, _textBrush,
-                        new RectangleF(labelX, bottom + 2 * scale, innerWidth / 2, bodyHeight + scale), _centeredText);
-                    graphics.DrawString(_audioLabels[index], _analysisBodyFont, _primaryTextBrush,
-                        new RectangleF(labelX, bottom + bodyHeight + 4 * scale, innerWidth / 2, bodyHeight + scale), _centeredText);
+                    var labelX = meterLeft + meterWidth * measure / 2;
+                    graphics.DrawString(measure == 0 ? "RMS" : compactLabels ? "Pk" : "Sample peak", _analysisBodyFont, _textBrush,
+                        new RectangleF(labelX, bottom + 2 * scale, meterWidth / 2, bodyHeight + scale), _centeredText);
+                    graphics.DrawString(compactLabels ? _audioShortLabels[index] : _audioLabels[index], _analysisBodyFont, _primaryTextBrush,
+                        new RectangleF(labelX, bottom + bodyHeight + 4 * scale, meterWidth / 2, bodyHeight + scale), _centeredText);
                 }
             }
-            if (labeled)
-                graphics.DrawString(_audio.HasStereo ? channel == 0 ? "LEFT" : "RIGHT" : "MONO", _analysisTitleFont, _primaryTextBrush,
+            if (showLabels)
+                graphics.DrawString(_audio.HasStereo ? channel == 0 ? "LEFT" : "RIGHT" : "MONO", compactLabels ? _analysisBodyFont : _analysisTitleFont, _primaryTextBrush,
                     new RectangleF(x, GetCaptionHeight(width, height) + 3 * scale, innerWidth, titleHeight + 2 * scale), _centeredText);
         }
-        DrawCaption(graphics, width, _audioCaption);
+        DrawCaption(graphics, width, compactLabels ? "RMS / sample peak • dBFS" : _audioCaption);
     }
 
     private void PaintOscilloscope(Graphics graphics, int width, int height)
     {
         if (!_audio.HasSamples || _waveDisplayCount < 1) { DrawUnavailable(graphics, width, height); return; }
-        var top = height >= 80 ? Math.Max(25f, GetCaptionHeight(width, height) + 3f) : 2f;
-        var bottom = Math.Max(top + 1, height - 4f);
+        EnsureAnalysisFonts(true);
+        var scale = graphics.DpiY / 96f;
+        var lineHeight = _analysisBodyFont.GetHeight(graphics);
+        var labeled = width >= 300 * scale && height >= Math.Max(130 * scale, lineHeight * 7);
+        var left = labeled ? Math.Max(58 * scale, graphics.MeasureString(_waveAmplitudeLabels[0] ?? "+1 FS", _analysisBodyFont).Width + 8 * scale) : 0;
+        var right = Math.Max(left + 1, width - (labeled ? 18 * scale : 1));
+        var top = height >= 80 ? Math.Max(25f, GetCaptionHeight(width, height) + (labeled ? lineHeight / 2 : 3f)) : 2f;
+        var bottom = Math.Max(top + 1, height - (labeled ? lineHeight + 7 * scale : 4f));
+        WaveformPlotBounds = RectangleF.FromLTRB(left, top, right, bottom);
         var center = (top + bottom) / 2;
         var halfHeight = (bottom - top) / 2;
-        graphics.DrawLine(_majorGridPen, 0, center, width, center);
-        var guides = _style == VisualStyle.Precision ? 8 : 4;
+        graphics.DrawLine(_majorGridPen, left, center, right, center);
+        var guides = GuidesVisible ? 8 : 4;
         for (var i = 1; i < guides; i++)
-            graphics.DrawLine(_gridPen, width * i / (float)guides, top, width * i / (float)guides, bottom);
-        _linePen.Width = 1.4f;
-        _linePen.Color = _theme.Low;
+            graphics.DrawLine(_gridPen, left + (right - left) * i / guides, top, left + (right - left) * i / guides, bottom);
+        if (labeled)
+            for (var tick = 0; tick < 5; tick++)
+            {
+                var y = top + (bottom - top) * tick / 4f;
+                if (tick != 2) graphics.DrawLine(_gridPen, left, y, right, y);
+                graphics.DrawString(_waveAmplitudeLabels[tick] ?? "0 FS", _analysisBodyFont, _textBrush,
+                    new RectangleF(0, y - lineHeight / 2, left - 5 * scale, lineHeight), _rightText);
+                var x = left + (right - left) * tick / 4f;
+                var textWidth = graphics.MeasureString(_waveTimeLabels[tick] ?? "0", _analysisBodyFont).Width + 2;
+                graphics.DrawString(_waveTimeLabels[tick] ?? "0", _analysisBodyFont, _textBrush,
+                    new RectangleF(Math.Max(left, Math.Min(width - textWidth, x - textWidth / 2)), bottom + 3 * scale, textWidth, lineHeight), _centeredText);
+            }
+        _linePen.Width = 1.8f;
+        _linePen.Color = _analyticalLow;
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        if (_waveDisplayCount <= width)
+        var pixelColumns = Math.Max(1, (int)(right - left));
+        if (_waveDisplayCount <= pixelColumns)
         {
-            var previous = new PointF(0, center - (float)(_audio.Wave[_waveStart] / _waveRange) * halfHeight);
+            var previous = new PointF(left, center - (float)(_audio.Wave[_waveStart] / _waveRange) * halfHeight);
             if (_waveDisplayCount == 1)
-                graphics.DrawLine(_linePen, 0, previous.Y, width - 1, previous.Y);
+                graphics.DrawLine(_linePen, left, previous.Y, right, previous.Y);
             for (var i = 1; i < _waveDisplayCount; i++)
             {
-                var point = new PointF(i * (width - 1f) / Math.Max(1, _waveDisplayCount - 1),
+                var point = new PointF(left + i * (right - left) / Math.Max(1, _waveDisplayCount - 1),
                     center - (float)(_audio.Wave[_waveStart + i] / _waveRange) * halfHeight);
                 graphics.DrawLine(_linePen, previous, point);
                 previous = point;
@@ -1625,11 +2059,11 @@ public sealed class AdvancedVisualizationControl : Control
         else
         {
             // keep min/max when several samples land on one pixel column so peaks don't vanish
-            var previousEnd = new PointF(0, center - (float)(_audio.Wave[_waveStart] / _waveRange) * halfHeight);
-            for (var x = 0; x < width; x++)
+            var previousEnd = new PointF(left, center - (float)(_audio.Wave[_waveStart] / _waveRange) * halfHeight);
+            for (var x = 0; x < pixelColumns; x++)
             {
-                var start = x * _waveDisplayCount / width;
-                var end = (x + 1) * _waveDisplayCount / width;
+                var start = x * _waveDisplayCount / pixelColumns;
+                var end = (x + 1) * _waveDisplayCount / pixelColumns;
                 float minimum = float.MaxValue, maximum = float.MinValue;
                 for (var sample = start; sample < end; sample++)
                 {
@@ -1637,11 +2071,11 @@ public sealed class AdvancedVisualizationControl : Control
                     minimum = Math.Min(minimum, value);
                     maximum = Math.Max(maximum, value);
                 }
-                graphics.DrawLine(_linePen, x, center - (float)(maximum / _waveRange) * halfHeight,
-                    x, center - (float)(minimum / _waveRange) * halfHeight);
-                var first = new PointF(x, center - (float)(_audio.Wave[_waveStart + start] / _waveRange) * halfHeight);
+                graphics.DrawLine(_linePen, left + x, center - (float)(maximum / _waveRange) * halfHeight,
+                    left + x, center - (float)(minimum / _waveRange) * halfHeight);
+                var first = new PointF(left + x, center - (float)(_audio.Wave[_waveStart + start] / _waveRange) * halfHeight);
                 if (x > 0) graphics.DrawLine(_linePen, previousEnd, first);
-                previousEnd = new PointF(x, center - (float)(_audio.Wave[_waveStart + end - 1] / _waveRange) * halfHeight);
+                previousEnd = new PointF(left + x, center - (float)(_audio.Wave[_waveStart + end - 1] / _waveRange) * halfHeight);
             }
         }
         DrawCaption(graphics, width, _waveCaption);
@@ -1650,17 +2084,18 @@ public sealed class AdvancedVisualizationControl : Control
     private void PaintSpectralBalance(Graphics graphics, int width, int height)
     {
         var top = height >= 100 ? Math.Max(30f, GetCaptionHeight(width, height) + 8f) : 2f;
-        var rowHeight = Math.Max(1, (height - top - 3) / 3);
+        var footer = width >= 400 && height >= 140 ? _paintFontHeight + 7 : 3;
+        var rowHeight = Math.Max(1, (height - top - footer) / 3);
         for (var group = 0; group < 3; group++)
         {
             var x = width >= 300 ? 170f : 2f;
             var y = top + group * rowHeight;
             var available = Math.Max(1, width - x - (width >= 300 ? 70 : 2));
             graphics.FillRectangle(_surfaceBrush, x, y + 3, available, Math.Max(1, rowHeight - 6));
-            if (_style == VisualStyle.Precision)
+            if (GuidesVisible)
                 for (var tick = 1; tick < 4; tick++)
                     graphics.DrawLine(_precisionPen, x + available * tick / 4, y + 3, x + available * tick / 4, y + rowHeight - 3);
-            _thresholdBrush.Color = group == 0 ? _theme.Low : group == 1 ? _theme.Mid : _theme.High;
+            _thresholdBrush.Color = _balanceColors[group];
             if (_balance[group] > 0)
                 graphics.FillRectangle(_thresholdBrush, x, y + 3, (float)(_balance[group] * available), Math.Max(1, rowHeight - 6));
             if (width >= 300)
@@ -1671,8 +2106,17 @@ public sealed class AdvancedVisualizationControl : Control
                     new RectangleF(x + available + 3, y, 65, rowHeight), _centeredText);
             }
         }
-        DrawCaption(graphics, width, "Relative power shares • estimated from displayed frequency bands");
+        if (footer > 3)
+        {
+            var available = Math.Max(1, width - 240);
+            for (var tick = 0; tick <= 4; tick++)
+                graphics.DrawString(s_percentageLabels[tick], Font, _textBrush,
+                    new RectangleF(170 + available * tick / 4f - 25, height - footer + 2, 50, footer - 2), _centeredText);
+        }
+        DrawCaption(graphics, width, "RELATIVE POWER SHARES • estimated from displayed bands • percent of total");
     }
+
+    private static readonly string[] s_percentageLabels = { "0%", "25%", "50%", "75%", "100%" };
 
     private static readonly string[] s_sevenShortNames = { "Sub", "Bass", "Low-Mid", "Mid", "Presence", "Treble", "Air" };
     private static readonly string[] s_sevenShortRanges = { "20–60", "60–250", "250–500", "0.5–2k", "2–6k", "6–10k", "10–20k" };
@@ -1702,6 +2146,7 @@ public sealed class AdvancedVisualizationControl : Control
 
     private void UpdateSevenBandBallistics()
     {
+        if (DisplayFrozen) return;
         var now = Stopwatch.GetTimestamp();
         var dtMs = _sevenLastTick == 0 ? 0f : Math.Min(250f, (now - _sevenLastTick) * 1000f / Stopwatch.Frequency);
         _sevenLastTick = now;
@@ -1735,18 +2180,20 @@ public sealed class AdvancedVisualizationControl : Control
 
     private void PaintAdvancedSpectralBalance(Graphics graphics, int width, int height)
     {
+        EnsureAnalysisFonts(true);
         const int count = SevenBandAnalyzer.BandCount;
-        var lineHeight = (float)Math.Ceiling(_paintFontHeight > 0 ? _paintFontHeight : Font.GetHeight());
+        var lineHeight = (float)Math.Ceiling(_analysisBodyFont.GetHeight(graphics));
+        var valueHeight = (float)Math.Ceiling(_analysisTitleFont.GetHeight(graphics));
         var slotEstimate = width / (float)count;
         var tier = slotEstimate >= 96 ? 2 : slotEstimate >= 52 ? 1 : 0;
         var showValue = height >= 70;
-        var showRange = height >= 90;
+        var showRange = height >= 90 && slotEstimate >= 36;
         var showName = height >= 110 && tier >= 1;
         var rows = (showValue ? 1 : 0) + (showRange ? 1 : 0) + (showName ? 1 : 0);
-        var labelBlock = rows * lineHeight + (rows > 0 ? 4 : 0);
+        var labelBlock = (showValue ? valueHeight : 0) + ((showRange ? 1 : 0) + (showName ? 1 : 0)) * lineHeight + (rows > 0 ? 4 : 0);
         var top = GetCaptionHeight(width, height);
         top = top > 0 ? top + 4 : 3;
-        var axisWidth = width >= 300 ? (float)Math.Ceiling(lineHeight * 2.6f) : 0f;
+        var axisWidth = width >= 210 ? (float)Math.Ceiling(lineHeight * 2.6f) : 0f;
         var left = 3 + axisWidth;
         var right = width - 4f;
         var bottom = height - labelBlock - 3f;
@@ -1770,7 +2217,7 @@ public sealed class AdvancedVisualizationControl : Control
                 var y = bottom - db / SevenBandRangeDb * plotHeight;
                 graphics.DrawLine(db % 24 == 0 ? _majorGridPen : _gridPen, left, y, right, y);
                 if (axisWidth > 0 && (db % 24 == 0 || plotHeight >= lineHeight * 12))
-                    graphics.DrawString(s_sevenAxisLabels[(72 - db) / 12], Font, _textBrush,
+                    graphics.DrawString(s_sevenAxisLabels[(72 - db) / 12], _analysisBodyFont, _textBrush,
                         new RectangleF(0, y - lineHeight / 2, axisWidth, lineHeight), _rightText);
             }
 
@@ -1799,15 +2246,17 @@ public sealed class AdvancedVisualizationControl : Control
                 if (showValue)
                 {
                     cell.Y = rowTop;
-                    graphics.DrawString(_sevenLabels[band] ?? "—", Font, _primaryTextBrush, cell, _centeredText);
-                    rowTop += lineHeight;
+                    cell.Height = valueHeight;
+                    graphics.DrawString(_sevenLabels[band] ?? "—", _analysisTitleFont, _primaryTextBrush, cell, _centeredText);
+                    rowTop += valueHeight;
+                    cell.Height = lineHeight;
                 }
 
                 if (showName)
                 {
                     cell.Y = rowTop;
                     graphics.DrawString(tier == 2 ? SevenBandAnalyzer.Definitions[band].Name : s_sevenShortNames[band],
-                        Font, _primaryTextBrush, cell, _centeredText);
+                        _analysisBodyFont, _primaryTextBrush, cell, _centeredText);
                     rowTop += lineHeight;
                 }
 
@@ -1815,7 +2264,7 @@ public sealed class AdvancedVisualizationControl : Control
                 {
                     cell.Y = rowTop;
                     graphics.DrawString(tier == 2 ? SevenBandAnalyzer.Definitions[band].RangeLabel : s_sevenShortRanges[band],
-                        Font, _textBrush, cell, _centeredText);
+                        _analysisBodyFont, _textBrush, cell, _centeredText);
                 }
             }
         }
@@ -1862,7 +2311,8 @@ public sealed class AdvancedVisualizationControl : Control
         graphics.SmoothingMode = SmoothingMode.None;
         graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
         graphics.PixelOffsetMode = PixelOffsetMode.Half;
-        var plotTop = GetCaptionHeight(width, height);
+        var legendHeight = GetHistoryLegendHeight(width, height);
+        var plotTop = GetCaptionHeight(width, height) + legendHeight;
         var labels = octaves && width >= 350 && height >= 100;
         var plotHeight = Math.Max(1, height - plotTop - (labels ? 20 : 0));
         var slots = Math.Min(_historyFrames, plotHeight);
@@ -1885,14 +2335,44 @@ public sealed class AdvancedVisualizationControl : Control
                 graphics.DrawString(width >= 1000 ? s_octaveBandLabels[group] : s_octaveLowerLabels[group], Font, _textBrush,
                     new RectangleF(group * width / (float)OctaveCount, height - 18, width / (float)OctaveCount, 16), _centeredText);
         }
-        if (_style == VisualStyle.Precision)
+        if (GuidesVisible)
         {
             var columns = octaves ? OctaveCount : 8;
             for (var column = 1; column < columns; column++)
-                graphics.DrawLine(_precisionPen, width * column / (float)columns, 0, width * column / (float)columns, height);
+                graphics.DrawLine(_precisionPen, width * column / (float)columns, plotTop, width * column / (float)columns, plotTop + plotHeight);
         }
         DrawCaption(graphics, width, _historyCaption);
+        if (legendHeight > 0)
+        {
+            var y = GetCaptionHeight(width, height);
+            var rampLeft = Math.Max(100, width / 3);
+            var rampWidth = Math.Max(20, width / 3);
+            for (var stop = 0; stop < 64; stop++)
+            {
+                _thresholdBrush.Color = Color.FromArgb(_paletteArgb[stop * 255 / 63]);
+                graphics.FillRectangle(_thresholdBrush, rampLeft + rampWidth * stop / 64f, y + 3,
+                    rampWidth / 64f + 1, Math.Max(4, legendHeight - 7));
+            }
+            graphics.DrawString("≤−72", Font, _textBrush, rampLeft - 48, y);
+            graphics.DrawString("0 dBFS", Font, _textBrush, rampLeft + rampWidth + 4, y);
+            if (width >= 900) graphics.DrawString("Quantized display level", Font, _textBrush, 5, y);
+        }
+        if (width >= 480 && plotHeight >= _paintFontHeight * 5 && plotTop + plotHeight - top >= _paintFontHeight * 4)
+        {
+            var markerWidth = Math.Min(width * 0.45f, graphics.MeasureString(_historyOldestLabel, Font).Width + 12);
+            var markerHeight = _paintFontHeight + 3;
+            _thresholdBrush.Color = Color.FromArgb(228, BackColor);
+            graphics.FillRectangle(_thresholdBrush, width - markerWidth - 3, top + 2, markerWidth, markerHeight);
+            graphics.DrawString(_historyOldestLabel, Font, _primaryTextBrush,
+                new RectangleF(width - markerWidth - 1, top + 2, markerWidth - 4, markerHeight), _centeredText);
+            graphics.FillRectangle(_thresholdBrush, width - markerWidth - 3, plotTop + plotHeight - markerHeight - 2, markerWidth, markerHeight);
+            graphics.DrawString("Latest received", Font, _primaryTextBrush,
+                new RectangleF(width - markerWidth - 1, plotTop + plotHeight - markerHeight - 2, markerWidth - 4, markerHeight), _centeredText);
+        }
     }
+
+    private int GetHistoryLegendHeight(int width, int height) =>
+        width >= 500 && height >= Math.Max(120, _paintFontHeight * 6) ? (int)Math.Ceiling(Math.Max(18, _paintFontHeight + 3)) : 0;
 
     private void WriteHistoryImageRow(int row, int offset)
     {
@@ -1934,7 +2414,8 @@ public sealed class AdvancedVisualizationControl : Control
     private void UpdateHistoryCaption()
     {
         if (_historyTicks == null || _historyCount == 0) return;
-        var top = GetCaptionHeight(ClientSize.Width, ClientSize.Height);
+        var top = GetCaptionHeight(ClientSize.Width, ClientSize.Height) +
+            (_mode == AdvancedVisualizationMode.SpectralHistory ? 0 : GetHistoryLegendHeight(ClientSize.Width, ClientSize.Height));
         var bottom = _mode == AdvancedVisualizationMode.OctaveWaterfall && ClientSize.Width >= 350 && ClientSize.Height >= 100 ? 20 : 0;
         var frames = _mode == AdvancedVisualizationMode.SpectralHistory
             ? Math.Min(_historyCount, PerspectiveHistoryFrames)
@@ -1944,23 +2425,34 @@ public sealed class AdvancedVisualizationControl : Control
         var tenths = (int)((_historyTicks[newest] - _historyTicks[oldest]) * 10 / Stopwatch.Frequency);
         if (tenths == _historySpanTenths && frames == _captionFrames && _captionHistoryMode == _mode) return;
         _historySpanTenths = tenths;
+        _historyOldestLabel = "Oldest · " + (tenths / 10d).ToString("0.0") + " s before latest";
         _captionFrames = frames;
         _captionHistoryMode = _mode;
         _historyCaption = _mode == AdvancedVisualizationMode.SpectralHistory
-            ? frames + " display frames • irregular intervals, not a time axis • latest at front"
-            : (tenths / 10d).ToString("0.0") + " s • " + frames + " displayed frames • newest at bottom";
+            ? "Creative perspective • " + frames + " display frames • irregular intervals, not a time axis • latest at front"
+            : (tenths / 10d).ToString("0.0") + " s received-frame span • " + frames + (frames == 1 ? " frame" : " frames") + " • oldest at top / newest at bottom" +
+                (_mode == AdvancedVisualizationMode.OctaveWaterfall ? " • approx. octave power" : string.Empty);
     }
 
     private void UpdateAggregates()
     {
         Array.Clear(_octavePower, 0, _octavePower.Length);
         Array.Clear(_balance, 0, _balance.Length);
+        var strongest = 0;
         for (var band = 0; band < BandCount; band++)
         {
+            if (_spectrum[band] > _spectrum[strongest]) strongest = band;
             var power = s_displayPower[_spectrum[band]];
             _octavePower[_octaveByBand[band]] += power;
             var hz = _bandPlan[band].CenterHz;
             _balance[hz < 250 ? 0 : hz < 4000 ? 1 : 2] += power;
+        }
+        if (_radialStrongestBand != strongest || _radialStrongestLevel != _spectrum[strongest])
+        {
+            _radialStrongestBand = strongest;
+            _radialStrongestLevel = _spectrum[strongest];
+            _radialStrongest = _spectrum[strongest] == 0 ? "No band above display floor"
+                : _bandLabels[strongest] + " · " + s_levelLabels[_spectrum[strongest]];
         }
         for (var group = 0; group < OctaveCount; group++)
             _octaveLevels[group] = LevelScale.ToDisplayByte(LevelScale.PowerToDb(_octavePower[group]));
@@ -2004,7 +2496,7 @@ public sealed class AdvancedVisualizationControl : Control
     private static bool IsMeasurementMode(AdvancedVisualizationMode mode) =>
         mode is AdvancedVisualizationMode.StereoLevels or AdvancedVisualizationMode.Oscilloscope or AdvancedVisualizationMode.SpectralBalance
             or AdvancedVisualizationMode.StereoSpectrum or AdvancedVisualizationMode.DynamicsHistory or AdvancedVisualizationMode.SpectralHistory
-            or AdvancedVisualizationMode.AdvancedSpectralBalance;
+            or AdvancedVisualizationMode.AdvancedSpectralBalance or AdvancedVisualizationMode.Overview or AdvancedVisualizationMode.StereoCompare;
 
     private static double[] BuildDisplayPower()
     {
@@ -2079,11 +2571,16 @@ public sealed class AdvancedVisualizationControl : Control
         {
             throw new ArgumentNullException(nameof(values));
         }
+        if (DisplayFrozen) return;
+        // Resume starts a fresh display history; the frozen interval is not an observed delta.
+        var resumed = _resumeSpectrum;
+        if (resumed) { ResetHistory(); _resumeSpectrum = false; }
 
         var copyCount = Math.Min(values.Length, BandCount);
         Array.Copy(_spectrum, _previousSpectrum, _spectrum.Length);
         Array.Clear(_spectrum, 0, _spectrum.Length);
         Array.Copy(values, 0, _spectrum, 0, copyCount);
+        if (resumed) Array.Copy(_spectrum, _previousSpectrum, BandCount);
         var tick = Stopwatch.GetTimestamp();
         var elapsedMs = _lastFrameTick == 0 ? 0f : (float)Math.Max(0, (tick - _lastFrameTick) * 1000d / Stopwatch.Frequency);
         _lastFrameTick = tick;
@@ -2163,7 +2660,12 @@ public sealed class AdvancedVisualizationControl : Control
     {
         for (var i = 0; i < _historyTracePens.Length; i++)
             if (_historyTracePens[i] != null)
-                _historyTracePens[i].Color = Blend(BackColor, _theme.Low, 1f - 0.78f * i / (PerspectiveSlices - 1));
+            {
+                _historyTracePens[i].Color = Blend(BackColor,
+                    i == 0 ? _theme.Ui.PrimaryText : _analyticalLow,
+                    i == 0 ? 1f : 0.7f - 0.30f * i / (PerspectiveSlices - 1));
+                _historyTracePens[i].Width = i == 0 ? 2.2f : 1f;
+            }
         for (var level = 0; level < _levelBrushes.Length; level++)
         {
             Color color;
@@ -2194,7 +2696,10 @@ public sealed class AdvancedVisualizationControl : Control
             if (_radialPens[level] != null) _radialPens[level].Color = color;
             if (_matrixSurfaceBrushes[level] != null)
                 _matrixSurfaceBrushes[level].Color = Blend(_theme.Ui.RaisedSurface, color, level == 0 ? 0 : 0.025f + level / 255f * 0.09f);
-            _paletteArgb[level] = color.ToArgb();
+            // History encodes one ordered quantity; decorative multi-hue palettes remain
+            // available to radial/matrix/bars without changing this luminance ordering.
+            _paletteArgb[level] = Blend(BackColor, _theme.Ui.PrimaryText,
+                (float)Math.Pow(level / 255f, 0.85)).ToArgb();
         }
         RebuildHistoryImage();
     }

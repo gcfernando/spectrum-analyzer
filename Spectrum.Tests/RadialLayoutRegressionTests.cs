@@ -102,6 +102,17 @@ public class RadialLayoutRegressionTests
             Assert.True(Field<bool>(control, "_radialLabelsVisible"));
             var texts = VisibleTexts(control);
             Assert.Equal(6, texts.Count);
+            // Retain the six calibrated caption/legend/landmark checks and give
+            // the new side-panel text its own actual painted ownership bounds.
+            if (!control.RadialLeftKeyBounds.IsEmpty)
+                texts.Add(("Radial display key", control.RadialLeftKeyBounds));
+            if (!control.RadialRightReadoutBounds.IsEmpty)
+                texts.Add(("Strongest band readout", control.RadialRightReadoutBounds));
+            foreach (var text in texts) AssertInside(text.Bounds, control.Width, control.Height);
+            for (var first = 0; first < texts.Count; first++)
+            for (var second = first + 1; second < texts.Count; second++)
+                Assert.False(texts[first].Bounds.IntersectsWith(texts[second].Bounds),
+                    $"Reserved radial text overlaps: {texts[first].Text} / {texts[second].Text} at {dpi} DPI.");
 
             control.ForeColor = control.BackColor;
             using var withoutText = new Bitmap(control.Width, control.Height);
@@ -121,7 +132,7 @@ public class RadialLayoutRegressionTests
                 ink[owner]++;
             }
             Assert.All(ink, count => Assert.True(count > 10, "Each reserved label must paint actual visible glyphs."));
-            _output.WriteLine($"{dpi} DPI, 20 pt: glyph pixels per caption/legend/landmark = {string.Join(", ", ink)}.");
+            _output.WriteLine($"{dpi} DPI, 20 pt: glyph pixels per caption/legend/landmark/side readout = {string.Join(", ", ink)}.");
         });
     }
 

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Windows.Forms;
@@ -29,9 +30,10 @@ public class CombinedRandomizationTests
         {
             var next = selector.Next(current, modes, BarColorThemes.Names, random);
             Assert.NotEqual(current.Mode, next.Mode);
-            Assert.NotEqual(current.Style, next.Style);
+            if (VisualStyles.GetEffectNames(next.Mode).Any(style => style != current.Style))
+                Assert.NotEqual(current.Style, next.Style);
             Assert.NotEqual(current.Theme, next.Theme);
-            Assert.Contains(next.Style, VisualStyles.GetSupportedNames(next.Mode));
+            Assert.Contains(next.Style, VisualStyles.GetEffectNames(next.Mode));
             Assert.DoesNotContain(next, recent);
             recent.Enqueue(next);
             if (recent.Count > 16)
@@ -43,7 +45,9 @@ public class CombinedRandomizationTests
         }
         Assert.Equal(modes.Length, seenModes.Count);
         Assert.Equal(BarColorThemes.Names.Length, seenThemes.Count);
-        Assert.Equal(VisualStyles.Names.Length, seenStyles.Count);
+        Assert.Equal(modes.SelectMany(VisualStyles.GetEffectNames).Distinct().Count(), seenStyles.Count);
+        Assert.DoesNotContain("Scanline", seenStyles);
+        Assert.DoesNotContain("Precision", seenStyles);
     }
 
     [Fact]
@@ -51,7 +55,7 @@ public class CombinedRandomizationTests
     {
         var modes = new[] { "Spectrum", "Bricks", "LED" };
         var themes = new[] { "Ice", "Sunset", "Studio" };
-        var candidateCounts = new[] { 10, 4, 6 };
+        var candidateCounts = modes.Select(mode => VisualStyles.GetEffectNames(mode).Count(style => style != "None") * 2).ToArray();
         for (var modeIndex = 0; modeIndex < modes.Length; modeIndex++)
         {
             var combinations = new HashSet<VisualSelection>();
@@ -111,6 +115,7 @@ public class CombinedRandomizationTests
             var modeSelector = GetField<ComboBox>(form, "_modeSelector");
             var styleSelector = GetField<ComboBox>(form, "_styleSelector");
             var themeSelector = GetField<ComboBox>(form, "_themeSelector");
+            var previousEffect = (string)styleSelector.SelectedItem;
             var observations = 0;
             EventHandler observe = (sender, args) =>
             {
@@ -134,7 +139,9 @@ public class CombinedRandomizationTests
             form.RandomizeVisualSelection(new Random(72));
             Assert.True(observations > 0);
             Assert.NotEqual("Spectrum", modeSelector.SelectedItem);
-            Assert.NotEqual(style, styleSelector.SelectedItem);
+            var effects = VisualStyles.GetEffectNames((string)modeSelector.SelectedItem);
+            Assert.Contains((string)styleSelector.SelectedItem, effects);
+            if (effects.Length > 1) Assert.NotEqual(previousEffect, styleSelector.SelectedItem);
             Assert.NotEqual("Ice", themeSelector.SelectedItem);
             Assert.Equal(GetField<string>(form, "_visualMode"), modeSelector.SelectedItem);
             Assert.Equal(GetField<string>(form, "_visualStyle"), styleSelector.SelectedItem);
@@ -179,10 +186,12 @@ public class CombinedRandomizationTests
         try { form = new FormAudioSpectrum(); }
         finally { AppDomain.CurrentDomain.AssemblyResolve -= resolve; }
         SetField(form, "_visualMode", mode);
-        SetField(form, "_visualStyle", style);
+        var migratedStyle = style == "Precision" || style == "Scanline" ? "None" : style;
+        SetField(form, "_showGuides", style == "Precision");
+        SetField(form, "_visualStyle", migratedStyle);
         SetField(form, "_barTheme", "Ice");
         GetField<ComboBox>(form, "_modeSelector").SelectedItem = mode;
-        GetField<ComboBox>(form, "_styleSelector").SelectedItem = style;
+        GetField<ComboBox>(form, "_styleSelector").SelectedItem = migratedStyle;
         GetField<ComboBox>(form, "_themeSelector").SelectedItem = "Ice";
         typeof(FormAudioSpectrum).GetMethod("InitializeBarsOptimized", BindingFlags.Instance | BindingFlags.NonPublic)
             .Invoke(form, new object[] { mode });
@@ -192,13 +201,14 @@ public class CombinedRandomizationTests
     [Theory]
     [InlineData("Precision")]
     [InlineData("Scanline")]
-    public void AdvancedStartupAppliesTheConfiguredStyle(string style)
+    public void AdvancedStartupMigratesLegacyStyleToIndependentGuidesOrRetiredEffect(string style)
     {
         RunOnSta(() =>
         {
             using var form = CreateForm(style, "Contour");
-            Assert.Equal(VisualStyles.Parse(style), GetField<AdvancedVisualizationControl>(form, "_advancedVisualizer").Style);
-            Assert.Equal(style, GetField<ComboBox>(form, "_styleSelector").SelectedItem);
+            Assert.Equal(VisualStyle.None, GetField<AdvancedVisualizationControl>(form, "_advancedVisualizer").Style);
+            Assert.Equal(style == "Precision", GetField<AdvancedVisualizationControl>(form, "_advancedVisualizer").ShowGuides);
+            Assert.Equal("None", GetField<ComboBox>(form, "_styleSelector").SelectedItem);
         });
     }
 
@@ -217,7 +227,7 @@ public class CombinedRandomizationTests
                 modes.SelectedIndex = modeIndex;
                 var mode = (string)modes.SelectedItem;
                 Assert.Equal(mode, GetField<string>(form, "_visualMode"));
-                Assert.Equal(VisualStyles.GetSupportedNames(mode),
+                Assert.Equal(VisualStyles.GetEffectNames(mode),
                     System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Cast<string>(styles.Items)));
                 for (var styleIndex = 0; styleIndex < styles.Items.Count; styleIndex++)
                 {

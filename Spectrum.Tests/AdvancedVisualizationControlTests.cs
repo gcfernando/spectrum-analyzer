@@ -88,28 +88,27 @@ public class AdvancedVisualizationControlTests
     {
         RunOnSta(() =>
         {
-            var modes = new[]
-            {
-                AdvancedVisualizationMode.Waterfall, AdvancedVisualizationMode.RadialSpectrum, AdvancedVisualizationMode.Contour,
-                AdvancedVisualizationMode.PeakTrace, AdvancedVisualizationMode.ThresholdMonitor, AdvancedVisualizationMode.BandMatrix,
-                AdvancedVisualizationMode.OctaveSpectrum, AdvancedVisualizationMode.SpectralFlux, AdvancedVisualizationMode.OctaveWaterfall,
-                AdvancedVisualizationMode.StereoLevels, AdvancedVisualizationMode.Oscilloscope, AdvancedVisualizationMode.SpectralBalance,
-                AdvancedVisualizationMode.StereoSpectrum, AdvancedVisualizationMode.DynamicsHistory
-            };
+            var modes = FormAudioSpectrum.VisualModeNames
+                .Where(name => name != "Spectrum" && name != "LED" && name != "Bricks")
+                .ToArray();
+            var resolve = typeof(FormAudioSpectrum).GetMethod("ResolveAdvancedMode", BindingFlags.Static | BindingFlags.NonPublic);
             var values = new byte[AdvancedVisualizationControl.BandCount];
             for (var band = 0; band < values.Length; band++)
                 values[band] = (byte)(1 + ((band * 254) / (values.Length - 1)));
 
             using var control = new AdvancedVisualizationControl { Size = new Size(220, 120) };
             control.SetAudioSamples(new[] { 0.2f, -0.4f, -0.3f, 0.6f, 0.1f, 0.1f, 0.5f, -0.2f }, 4, 2, 48000);
-            foreach (var mode in modes)
+            foreach (var modeName in modes)
             {
+                var mode = (AdvancedVisualizationMode)resolve.Invoke(null, new object[] { modeName });
                 foreach (var theme in BarColorThemes.Names)
                 {
-                    foreach (var styleName in VisualStyles.GetSupportedNames(GetModeName(mode)))
+                    foreach (var styleName in VisualStyles.GetEffectNames(modeName))
+                    foreach (var guides in new[] { false, true })
                     {
                         control.Mode = mode;
                         control.Style = VisualStyles.Parse(styleName);
+                        control.ShowGuides = guides;
                         control.SetSpectrum(values, theme, mode);
                         using var bitmap = new Bitmap(control.Width, control.Height);
                         control.DrawToBitmap(bitmap, new Rectangle(Point.Empty, control.Size));

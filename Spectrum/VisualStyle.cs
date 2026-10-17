@@ -11,24 +11,26 @@ internal enum VisualStyle
     Glow,
     Trail,
     Scanline,
-    Precision
+    Precision,
+    Outline
 }
 
 // Helpers that map mode names to the styles each one actually supports
 internal static class VisualStyles
 {
-    internal static readonly string[] Names = { "None", "Pulse", "Glow", "Trail", "Scanline", "Precision" };
+    internal static readonly string[] Names = { "None", "Pulse", "Glow", "Trail", "Scanline", "Precision", "Outline" };
     // Pre-built lists per mode family so we don't allocate on every lookup
     private static readonly string[] s_noStyles = { "None" };
-    private static readonly string[] s_meterStyles = { "None", "Scanline", "Precision" };
-    private static readonly string[] s_ledStyles = { "None", "Pulse", "Scanline", "Precision" };
-    private static readonly string[] s_fullStyles = { "None", "Pulse", "Glow", "Trail", "Scanline", "Precision" };
-    private static readonly string[] s_advancedStyles = { "None", "Scanline", "Precision" };
+    private static readonly string[] s_meterStyles = { "None", "Scanline", "Precision", "Outline" };
+    private static readonly string[] s_ledStyles = { "None", "Pulse", "Scanline", "Precision", "Outline" };
+    private static readonly string[] s_fullStyles = { "None", "Pulse", "Glow", "Trail", "Scanline", "Precision", "Outline" };
+    private static readonly string[] s_advancedStyles = { "None", "Scanline", "Precision", "Outline" };
     private static readonly string[] s_measurementStyles = { "None", "Precision" };
 
     // Cleans up saved/user text into a known style name, falling back to None
     internal static string Resolve(string value)
     {
+        if (string.Equals(value?.Trim(), "Soft Glow", StringComparison.OrdinalIgnoreCase)) return "Glow";
         foreach (var name in Names)
         {
             if (string.Equals(name, value?.Trim(), StringComparison.OrdinalIgnoreCase))
@@ -66,11 +68,14 @@ internal static class VisualStyles
             string.Equals(mode, "Advanced Spectral Balance", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Waterfall", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Octave Waterfall", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(mode, "Radial Spectrum", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Overview", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Stereo Compare", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Band Matrix", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Octave Spectrum", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Level Change", StringComparison.OrdinalIgnoreCase))
             return s_measurementStyles;
+        if (string.Equals(mode, "Radial Spectrum", StringComparison.OrdinalIgnoreCase))
+            return new[] { "None", "Glow", "Precision", "Outline" };
         if (string.Equals(mode, "Spectrum", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(mode, "Wave", StringComparison.OrdinalIgnoreCase))
             return s_fullStyles;
@@ -89,19 +94,25 @@ internal static class VisualStyles
         return s_noStyles;
     }
 
+    // Effects are independent from analytical guides. Legacy styles still parse saved settings.
+    internal static string[] GetEffectNames(string mode) =>
+        Array.FindAll(GetSupportedNames(mode), name => name != "Precision" && name != "Scanline");
+
     // Text to enum, anything unrecognized quietly becomes None
     internal static VisualStyle Parse(string value) =>
         string.Equals(value, "Pulse", StringComparison.OrdinalIgnoreCase) ? VisualStyle.Pulse :
-        string.Equals(value, "Glow", StringComparison.OrdinalIgnoreCase) ? VisualStyle.Glow :
+        (string.Equals(value, "Glow", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "Soft Glow", StringComparison.OrdinalIgnoreCase)) ? VisualStyle.Glow :
         string.Equals(value, "Trail", StringComparison.OrdinalIgnoreCase) ? VisualStyle.Trail :
         string.Equals(value, "Scanline", StringComparison.OrdinalIgnoreCase) ? VisualStyle.Scanline :
         string.Equals(value, "Precision", StringComparison.OrdinalIgnoreCase) ? VisualStyle.Precision :
+        string.Equals(value, "Outline", StringComparison.OrdinalIgnoreCase) ? VisualStyle.Outline :
         VisualStyle.None;
 
     // Modes drawn by the advanced visualization control rather than the basic bar meters
     private static bool IsAdvancedMode(string mode) =>
         string.Equals(mode, "Waterfall", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(mode, "Radial Spectrum", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(mode, "Overview", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "Stereo Compare", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Contour", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Peak Trace", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(mode, "Threshold Monitor", StringComparison.OrdinalIgnoreCase) ||

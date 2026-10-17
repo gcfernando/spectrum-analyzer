@@ -39,6 +39,23 @@ internal sealed class VisualizerPreferences : ApplicationSettingsBase
         set => this[nameof(Style)] = value;
     }
 
+    // An empty value distinguishes existing Precision preferences from an explicit guides choice.
+    [UserScopedSetting]
+    [DefaultSettingValue("")]
+    public string Guides
+    {
+        get => (string)this[nameof(Guides)];
+        set => this[nameof(Guides)] = value;
+    }
+
+    [UserScopedSetting]
+    [DefaultSettingValue("Palette")]
+    public string Appearance
+    {
+        get => (string)this[nameof(Appearance)];
+        set => this[nameof(Appearance)] = value;
+    }
+
     // Either "Fixed" or "Random"; random cycles modes on a timer
     [UserScopedSetting]
     [DefaultSettingValue("Fixed")]
@@ -63,7 +80,7 @@ internal sealed class VisualPreferenceSnapshot
 {
     // Built via Load() only, so there's one place that decides the fallbacks
     private VisualPreferenceSnapshot(string mode, string style, string theme,
-        bool randomEnabled, int intervalMinutes, Exception error)
+        bool randomEnabled, int intervalMinutes, Exception error, string guides = "", string appearance = "Palette")
     {
         Mode = mode;
         Style = style;
@@ -71,8 +88,16 @@ internal sealed class VisualPreferenceSnapshot
         RandomEnabled = randomEnabled;
         IntervalMinutes = intervalMinutes;
         Error = error;
+        ShowGuides = string.IsNullOrWhiteSpace(guides)
+            ? string.Equals(style?.Trim(), "Precision", StringComparison.OrdinalIgnoreCase)
+            : bool.TryParse(guides, out var enabled) && enabled;
+        Appearance = ResolveAppearance(appearance);
     }
 
+    internal static string ResolveAppearance(string value) =>
+        value == "System" || value == "Dark" || value == "Light" || value == "High Contrast" ? value : "Palette";
+    internal bool ShowGuides { get; }
+    internal string Appearance { get; }
     internal string Mode { get; }
     internal string Style { get; }
     internal string Theme { get; }
@@ -123,7 +148,7 @@ internal sealed class VisualPreferenceSnapshot
                 string.IsNullOrWhiteSpace(savedMode) ? mode : savedMode,
                 string.IsNullOrWhiteSpace(savedStyle) ? style : savedStyle,
                 string.IsNullOrWhiteSpace(savedTheme) ? theme : savedTheme,
-                randomEnabled, intervalMinutes, null);
+                randomEnabled, intervalMinutes, null, preferences.Guides, preferences.Appearance);
         }
         catch (Exception exception) when (IsPreferenceReadError(exception))
         {

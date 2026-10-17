@@ -22,7 +22,7 @@ public partial class FormAudioSpectrum : Form
     private static readonly string[] s_advancedModes =
     {
         "Waterfall", "Radial Spectrum", "Contour", "Peak Trace", "Threshold Monitor", "Band Matrix",
-        "Octave Spectrum", "Level Change", "Octave Waterfall", "Stereo Levels", "Oscilloscope", "Spectral Balance", "Advanced Spectral Balance", "Stereo Spectrum", "Dynamics History", "Spectral History"
+        "Octave Spectrum", "Level Change", "Octave Waterfall", "Stereo Levels", "Oscilloscope", "Spectral Balance", "Advanced Spectral Balance", "Stereo Spectrum", "Dynamics History", "Spectral History", "Overview", "Stereo Compare"
     };
     private static readonly string[] s_visualModes = BuildModeNames();
     private static readonly string[] s_colorThemes = BarColorThemes.Names;
@@ -102,6 +102,18 @@ public partial class FormAudioSpectrum : Form
     private ComboBox _styleSelector;
     private ComboBox _themeSelector;
     private Button _rotationSettingsButton;
+    private Button _guidesButton;
+    private Button _freezeButton;
+    private Button _viewButton;
+    private ContextMenuStrip _viewMenu;
+    private Button _pinButton;
+    private bool _showGuides;
+    private bool _displayFrozen;
+    private bool _compactToolbar;
+    private string _appearance = "Palette";
+    private float _effectStrength = .6f;
+    private string _effectFallbackMessage;
+    private string _shownEffectFeedback;
     private ToolTip _selectionToolTip;
     private Label _captureStatusLabel;
     private System.Windows.Forms.Timer _captureStatusTimer;
@@ -133,6 +145,7 @@ public partial class FormAudioSpectrum : Form
     public FormAudioSpectrum()
     {
         InitializeComponent();
+        KeyUp -= FormAudioSpectrum_KeyUp;
         ambiance_ThemeSpectrum.Sizable = true;
 
         _spectrumBuffer = new byte[BAR_COUNT];
@@ -148,11 +161,24 @@ public partial class FormAudioSpectrum : Form
         InitializeSelectionControls();
     }
 
+    // Handle commands before a focused native ComboBox can perform letter navigation.
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.M)) { SelectNextItem(_modeSelector); return true; }
+        if (keyData == (Keys.Control | Keys.T)) { SelectNextItem(_themeSelector); return true; }
+        if (keyData == (Keys.Control | Keys.R)) { ShowRotationSettings(); return true; }
+        if (keyData == (Keys.Control | Keys.G)) { ToggleGuides(); return true; }
+        if (keyData == (Keys.Control | Keys.Space)) { SetDisplayFrozen(!_displayFrozen); return true; }
+        if (keyData == (Keys.Control | Keys.S)) { SaveVisualizationImage(); return true; }
+        if (keyData == Keys.F12) { TogglePin(); return true; }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
     private void FormAudioSpectrum_KeyUp(object sender, KeyEventArgs e)
     {
         if (e.KeyCode == Keys.F12)
         {
-            TopMost = !TopMost;
+            TogglePin();
             return;
         }
 
@@ -184,6 +210,9 @@ public partial class FormAudioSpectrum : Form
         LoadVisualPreferences(out var configuredMode, out var configuredStyle, out var configuredTheme);
         ResolveConfiguredVisualState(configuredMode, configuredStyle, out _visualMode, out _visualStyle);
         _barTheme = ResolveConfiguredTheme(configuredTheme);
+        // Precision now migrates to independent guides; Scanline is retired from new selections.
+        if (_visualStyle == "Precision" || _visualStyle == "Scanline") _visualStyle = "None";
+        UpdateUtilityButtons();
 
         _initializingSelectors = true;
         try
@@ -223,6 +252,7 @@ public partial class FormAudioSpectrum : Form
         };
 
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         Taskbar.SetState(Handle, Taskbar.TaskbarStates.NoProgress);
     }
@@ -234,6 +264,8 @@ public partial class FormAudioSpectrum : Form
         mode = snapshot.Mode;
         style = snapshot.Style;
         theme = snapshot.Theme;
+        _showGuides = snapshot.ShowGuides;
+        _appearance = snapshot.Appearance;
         _randomRotationEnabled = snapshot.RandomEnabled;
         _rotationIntervalMinutes = snapshot.IntervalMinutes;
         if (snapshot.Error != null)
@@ -261,12 +293,15 @@ public partial class FormAudioSpectrum : Form
             ? $" | {status.SampleRate:N0} Hz / {status.Channels} ch"
             : string.Empty;
         var error = status.ErrorCode.HasValue ? $" (error {status.ErrorCode.Value})" : string.Empty;
-        var text = $"{status.State} | WASAPI loopback | {source}{format} | {status.Message}{error}";
-        if (_captureStatusLabel.Text == text)
+        var details = $"{status.State} | WASAPI loopback | {source}{format} | {status.Message}{error}";
+        var text = string.IsNullOrEmpty(_effectFallbackMessage)
+            ? $"{(_displayFrozen ? "Display frozen \u00B7 " : string.Empty)}{status.State} \u00B7 {source}{format}"
+            : _effectFallbackMessage + $" | Capture: {status.State}";
+        if (_captureStatusLabel.Text == text && _captureStatusLabel.AccessibleDescription == details)
             return;
         _captureStatusLabel.Text = text;
-        _captureStatusLabel.AccessibleDescription = text;
-        _selectionToolTip.SetToolTip(_captureStatusLabel, text);
+        _captureStatusLabel.AccessibleDescription = details;
+        _selectionToolTip.SetToolTip(_captureStatusLabel, details);
     }
 
     private void InitializeSelectionControls()
@@ -304,14 +339,14 @@ public partial class FormAudioSpectrum : Form
             AutoSize = false,
             ForeColor = Color.FromArgb(215, 210, 196),
             Font = ambiance_ThemeSpectrum.Font,
-            Text = "&Style",
+            Text = "&Effect",
             TextAlign = ContentAlignment.MiddleLeft,
             Size = new Size(37, 24),
             Margin = new Padding(7, 0, 0, 0)
         };
 
-        _styleSelector = CreateSelector("styleSelector", 110, VisualStyles.Names, false, true);
-        _styleSelector.AccessibleName = "Optional visual style";
+        _styleSelector = CreateSelector("styleSelector", 110, VisualStyles.GetEffectNames("Spectrum"), false, true);
+        _styleSelector.AccessibleName = "Optional visual effect";
         _styleSelector.AccessibleDescription = "Optional visual emphasis, limited to styles supported by the selected mode.";
         _styleSelector.TabIndex = 1;
 
@@ -320,14 +355,14 @@ public partial class FormAudioSpectrum : Form
             AutoSize = false,
             ForeColor = Color.FromArgb(215, 210, 196),
             Font = ambiance_ThemeSpectrum.Font,
-            Text = "&Theme",
+            Text = "&Palette",
             TextAlign = ContentAlignment.MiddleLeft,
             Size = new Size(45, 24),
             Margin = new Padding(7, 0, 0, 0)
         };
 
         _themeSelector = CreateSelector("themeSelector", 160, s_colorThemes, true);
-        _themeSelector.AccessibleName = "Bar color theme";
+        _themeSelector.AccessibleName = "Signal palette";
         _themeSelector.AccessibleDescription = "Press Ctrl+T to cycle bar color themes";
         _themeSelector.TabIndex = 2;
 
@@ -339,7 +374,7 @@ public partial class FormAudioSpectrum : Form
             Font = ambiance_ThemeSpectrum.Font,
             Name = "rotationSettingsButton",
             Size = new Size(76, 24),
-            Text = "Fixed",
+            Text = "Rotation: Fixed",
             TabIndex = 3,
             Margin = new Padding(8, 0, 0, 0),
             AccessibleName = "Mode, style, and theme rotation settings"
@@ -371,6 +406,10 @@ public partial class FormAudioSpectrum : Form
         _selectionPanel.Controls.Add(_themeSelectorLabel);
         _selectionPanel.Controls.Add(_themeSelector);
         _selectionPanel.Controls.Add(_rotationSettingsButton);
+        _guidesButton = CreateUtilityButton("guidesButton", "Guides: Off", "Toggle measurement guides (Ctrl+G)", ToggleGuides);
+        _freezeButton = CreateUtilityButton("freezeButton", "Freeze", "Freeze the display while audio capture continues (Ctrl+Space)", () => SetDisplayFrozen(!_displayFrozen));
+        _pinButton = CreateUtilityButton("pinButton", "Pin", "Keep Spectrum above other windows (F12)", TogglePin);
+        _viewButton = CreateUtilityButton("viewButton", "View\u2026", "Browse modes, presets, appearance, display controls and save an image", ShowViewMenu);
         _modeSelector.SelectedIndexChanged += ModeSelector_SelectedIndexChanged;
         _styleSelector.SelectedIndexChanged += StyleSelector_SelectedIndexChanged;
         _themeSelector.SelectedIndexChanged += ThemeSelector_SelectedIndexChanged;
@@ -387,9 +426,702 @@ public partial class FormAudioSpectrum : Form
         _rotationSettingsButton.FontChanged += (s, e) => RefreshSelectionLayout();
     }
 
+    private BarColorTheme CurrentTheme() => BarColorThemes.ApplyAppearance(BarColorThemes.Resolve(_barTheme), _appearance);
+
+    private Button CreateUtilityButton(string name, string text, string description, Action action)
+    {
+        var button = new Button
+        {
+            Name = name, Text = text, AccessibleName = description, AccessibleDescription = description,
+            FlatStyle = FlatStyle.Flat, Font = ambiance_ThemeSpectrum.Font,
+            Margin = new Padding(6, 0, 0, 0), Size = new Size(76, 24), AutoSize = false
+        };
+        button.Click += (sender, args) => action();
+        button.FontChanged += (sender, args) => RefreshSelectionLayout();
+        _selectionToolTip.SetToolTip(button, description);
+        _selectionPanel.Controls.Add(button);
+        return button;
+    }
+
+    private void ToggleGuides()
+    {
+        _showGuides = !_showGuides;
+        if (_progressBars != null) ApplyVisualStyle();
+        UpdateUtilityButtons();
+        SaveVisualPreferences(true);
+    }
+
+    private void TogglePin()
+    {
+        TopMost = !TopMost;
+        UpdateUtilityButtons();
+    }
+
+    private void UpdateUtilityButtons()
+    {
+        if (_guidesButton != null) _guidesButton.Text = _showGuides ? "Guides: On" : "Guides: Off";
+        if (_freezeButton != null) _freezeButton.Text = _displayFrozen ? "Resume" : "Freeze";
+        if (_pinButton != null) _pinButton.Text = TopMost ? "Pinned" : "Pin";
+        PositionSelectionPanel();
+    }
+
+    internal void SetDisplayFrozen(bool frozen)
+    {
+        if (_displayFrozen == frozen) return;
+        _displayFrozen = frozen;
+        if (_progressBars != null)
+            foreach (var progress in _progressBars) progress.DisplayFrozen = frozen;
+        if (_advancedVisualizer != null) _advancedVisualizer.DisplayFrozen = frozen;
+        if (frozen) _rotationTimer?.Stop();
+        else
+        {
+            // Resume at the newest captured frame. Renderer resume resets visual histories;
+            // skipped display frames are never presented as uninterrupted history.
+            ApplySpectrumToUI();
+            ConfigureRotationTimer();
+        }
+        UpdateUtilityButtons();
+        UpdateCaptureStatus();
+    }
+
+    private static string DisplayChoice(string choice, bool palette, bool effect)
+    {
+        if (effect && choice == "Glow") return "Soft Glow";
+        if (palette && choice == "MonoCyan") return "Mono Cyan";
+        if (palette && choice == "ClassicSmooth") return "Classic Smooth";
+        if (!palette && !effect && choice == "Level Change") return "Band Level Change";
+        if (!palette && !effect && choice == "Spectral History") return "Perspective History";
+        return choice;
+    }
+
+    internal static string GetEffectDescription(string effect) => VisualStyles.Resolve(effect) switch
+    {
+        "Pulse" => "Level-driven brightness emphasis; this is not beat detection. View > Effect intensity adjusts its strength.",
+        "Glow" => "A soft halo around the active signal edge. The measured edge remains primary; intensity changes presentation only.",
+        "Trail" => "400 ms of fading visual persistence from recent display levels. This is separate from Peak Trace's 300 ms held envelope and does not change audio analysis.",
+        "Outline" => "Outlines the active signal instead of filling its body. Inactive space and reference guides stay quiet.",
+        "Precision" => "Legacy reference guides. Guides are now independent and never change measurement accuracy.",
+        "Scanline" => "Legacy scanline presentation; new selections use the simpler effects and independent reference guides.",
+        _ => "No decorative effect. Measured signal, essential scales and independent reference guides remain available."
+    };
+
+    private void UpdateEffectHelp()
+    {
+        var help = GetEffectDescription(_visualStyle);
+        if (VisualStyles.GetEffectNames(_visualMode).Length <= 1)
+            help = "This analytical view supports None; decorative effects are unavailable. Guides remain independent. " + help;
+        if (string.IsNullOrEmpty(_effectFallbackMessage) && _captureStatusLabel.Text == _shownEffectFeedback)
+            _captureStatusLabel.Text = "Starting audio capture...";
+        _shownEffectFeedback = _effectFallbackMessage;
+        if (!string.IsNullOrEmpty(_effectFallbackMessage))
+        {
+            help = _effectFallbackMessage + " " + help;
+            _captureStatusLabel.Text = _effectFallbackMessage;
+        }
+        _styleSelector.AccessibleDescription = help;
+        _selectionToolTip.SetToolTip(_styleSelector, help);
+    }
+
+    internal static string GetPaletteDescription(string palette) => palette switch
+    {
+        "ClassicSmooth" => "Traditional green, amber and orange signal palette; a familiar general-purpose meter appearance.",
+        "Ice" => "Cool blue and cyan progression for a restrained technical display.",
+        "Sunset" => "Warm amber-to-coral signal progression with a pale gold peak; broader warm hues than Obsidian Gold.",
+        "MonoCyan" => "A restrained cyan lightness family for clear technical displays.",
+        "Synthwave" => "Violet, magenta and cyan creative palette with an explicit analytical stroke contrast floor.",
+        "Aurora" => "Emerald, cyan and lavender creative palette for luminous radial and filled views.",
+        "Obsidian Gold" => "A mostly gold and pale-gold progression; more monochromatic and restrained than Sunset's coral range.",
+        "Midnight Prism" => "Violet-to-cyan creative palette. History uses a separate ordered intensity ramp.",
+        "Emerald Noir" => "Emerald, jade and mint progression for a calm green signal family.",
+        "Crimson Velvet" => "Crimson, rose and blush progression for controlled warm contrast.",
+        "Studio" => "Neutral analytical workspace with teal and blue signals and readable reference marks.",
+        "Platinum Light" => "A light instrument workspace with contrasting dark signals, suitable for bright surroundings.",
+        "High Contrast" => "An ordered yellow signal family with high-visibility application surfaces and focus. Quantitative history and monitoring retain their own labels and semantics.",
+        _ => "Signal palette. Application appearance can be chosen independently."
+    };
+
+    private void UpdatePaletteHelp()
+    {
+        if (_themeSelector == null || _selectionToolTip == null) return;
+        var help = GetPaletteDescription(_barTheme) + " Appearance: " + _appearance +
+            ". Swatches reflect that appearance. History uses an ordered intensity ramp, and threshold/channel labels retain their meanings. Ctrl+T cycles palettes.";
+        _themeSelector.AccessibleDescription = help;
+        _selectionToolTip.SetToolTip(_themeSelector, help);
+    }
+
+    private static string ModeGroup(string mode) => mode switch
+    {
+        "Overview" or "Spectrum" or "Contour" or "Peak Trace" or "Octave Spectrum" or "Advanced Spectral Balance" or "Spectral Balance" => "Analyze",
+        "Stereo Compare" or "Stereo Levels" or "Stereo Spectrum" or "Oscilloscope" => "Stereo and waveform",
+        "Waterfall" or "Octave Waterfall" or "Dynamics History" or "Level Change" => "History and change",
+        "Band Matrix" or "Threshold Monitor" => "Inspect and monitor",
+        _ => "Creative"
+    };
+
+    internal static string[] PresetNames => new[] { "Overview", "Analyze", "Compare Peaks", "Stereo", "Band Change", "Retro Bricks", "Ambient Radial", "History", "Clean Outline" };
+
+    internal static VisualSelection GetPresetSelection(string name) => name switch
+    {
+        "Overview" => new VisualSelection("Overview", "None", "Studio"),
+        "Analyze" => new VisualSelection("Advanced Spectral Balance", "None", "Studio"),
+        "Compare Peaks" => new VisualSelection("Peak Trace", "None", "Studio"),
+        "Stereo" => new VisualSelection("Stereo Compare", "None", "Studio"),
+        "Band Change" => new VisualSelection("Level Change", "None", "Studio"),
+        "Retro Bricks" => new VisualSelection("Bricks", "None", "ClassicSmooth"),
+        "Ambient Radial" => new VisualSelection("Radial Spectrum", "Glow", "Aurora"),
+        "History" => new VisualSelection("Waterfall", "None", "Studio"),
+        "Clean Outline" => new VisualSelection("Spectrum", "Outline", "MonoCyan"),
+        _ => throw new ArgumentException("Unknown preset.", nameof(name))
+    };
+
+    internal static string GetPresetDescription(string name)
+    {
+        var purpose = name switch
+        {
+            "Overview" => "Survey the frequency spectrum beside independent channel levels.",
+            "Analyze" => "Inspect seven measured frequency bands and their held peaks in dBFS.",
+            "Compare Peaks" => "Compare the current spectrum with its dashed 300 ms held envelope.",
+            "Stereo" => "Compare independent left and right spectra on one aligned reference.",
+            "Band Change" => "Inspect signed frame-to-frame changes of quantized display levels, with an explicit range.",
+            "Retro Bricks" => "Enjoy large rectangular cells with a calm inactive background.",
+            "Ambient Radial" => "Explore clockwise frequency bands with a secondary soft halo.",
+            "History" => "Read frequency intensity over received display frames with a sequential level legend.",
+            "Clean Outline" => "Read the active spectrum through a restrained cyan outline and reference guides.",
+            _ => throw new ArgumentException("Unknown preset.", nameof(name))
+        };
+        var selection = GetPresetSelection(name);
+        return purpose + "\r\n" + DisplayChoice(selection.Mode, false, false) + " | " +
+            DisplayChoice(selection.Style, false, true) + " | " + DisplayChoice(selection.Theme, true, false) +
+            " | Guides: " + (name == "Retro Bricks" || name == "Ambient Radial" ? "Off" : "On");
+    }
+
+    private void ShowPresetBrowser()
+    {
+        using var dialog = CreatePresetBrowser();
+        if (dialog.ShowDialog(this) == DialogResult.OK && dialog.Controls.Find("presetList", true)[0] is ListBox list
+            && list.SelectedItem is string preset) ApplyPreset(preset);
+    }
+
+    internal Form CreatePresetBrowser()
+    {
+        var ui = CurrentTheme().Ui;
+        var dialog = new Form { Text = "Preview a preset", Name = "presetBrowser", StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(860, 510), MinimumSize = new Size(640, 430), MinimizeBox = false, MaximizeBox = false,
+            ShowInTaskbar = false, Font = ambiance_ThemeSpectrum.Font, AutoScaleMode = AutoScaleMode.Font,
+            BackColor = ui.Surface, ForeColor = ui.PrimaryText };
+        var list = new ListBox { Name = "presetList", AccessibleName = "Goal-based presets", Dock = DockStyle.Left,
+            Width = 160, IntegralHeight = false, BackColor = ui.ControlSurface, ForeColor = ui.PrimaryText };
+        list.Items.AddRange(PresetNames);
+        var details = new Label { Name = "presetDetails", AccessibleName = "Preset purpose and combination", Dock = DockStyle.Top,
+            Height = 76, Padding = new Padding(8), ForeColor = ui.PrimaryText };
+        var notice = new Label { Name = "previewNotice", Text = "Illustrative preview - deterministic sample data, not live audio. Applying a preset changes presentation only.",
+            AccessibleName = "Preview uses illustrative sample data", Dock = DockStyle.Bottom, Height = 42,
+            Padding = new Padding(8), ForeColor = ui.SecondaryText };
+        var preview = new PictureBox { Name = "presetPreview", AccessibleName = "Illustrative preset rendering", Dock = DockStyle.Fill,
+            SizeMode = PictureBoxSizeMode.Zoom, BackColor = ui.VisualizationSurface };
+        var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8) };
+        body.Controls.Add(preview); body.Controls.Add(details); body.Controls.Add(notice);
+        var apply = new Button { Text = "Apply preset", AutoSize = true, DialogResult = DialogResult.OK,
+            FlatStyle = FlatStyle.Flat, ForeColor = ui.PrimaryText, BackColor = ui.ControlSurface };
+        var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel,
+            FlatStyle = FlatStyle.Flat, ForeColor = ui.PrimaryText, BackColor = ui.ControlSurface };
+        foreach (var button in new[] { apply, cancel })
+        {
+            button.FlatAppearance.BorderColor = ui.Divider;
+            button.FlatAppearance.MouseOverBackColor = ui.Hover;
+        }
+        var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6) };
+        footer.Controls.Add(cancel); footer.Controls.Add(apply);
+        dialog.Controls.Add(body); dialog.Controls.Add(list); dialog.Controls.Add(footer);
+        dialog.AcceptButton = apply; dialog.CancelButton = cancel;
+        list.SelectedIndexChanged += (sender, args) =>
+        {
+            if (!(list.SelectedItem is string preset)) return;
+            details.Text = GetPresetDescription(preset);
+            var image = RenderPresetPreview(preset, new Size(660, 320));
+            var old = preview.Image;
+            preview.Image = image;
+            old?.Dispose();
+        };
+        dialog.Disposed += (sender, args) => preview.Image?.Dispose();
+        try
+        {
+            list.SelectedIndex = 0;
+            return dialog;
+        }
+        catch { dialog.Dispose(); throw; }
+    }
+
+    internal Bitmap RenderPresetPreview(string name, Size size)
+    {
+        if (size.Width < 160 || size.Height < 100) throw new ArgumentOutOfRangeException(nameof(size));
+        var selection = GetPresetSelection(name);
+        var theme = BarColorThemes.ApplyAppearance(BarColorThemes.Resolve(selection.Theme), _appearance);
+        var image = new Bitmap(size.Width, size.Height);
+        var levels = new byte[BAR_COUNT];
+        var leftPower = new double[BAR_COUNT];
+        var rightPower = new double[BAR_COUNT];
+        for (var band = 0; band < BAR_COUNT; band++)
+        {
+            var db = -42 + 21 * Math.Sin(band * .065) + 9 * Math.Sin(band * .29);
+            levels[band] = LevelScale.ToDisplayByte(db);
+            leftPower[band] = .5 * Math.Pow(10, db / 10);
+            rightPower[band] = .5 * Math.Pow(10, (db - 5 + 7 * Math.Sin(band * .11)) / 10);
+        }
+        var guides = name != "Retro Bricks" && name != "Ambient Radial";
+        try
+        {
+            if (IsAdvancedMode(selection.Mode))
+            {
+                var audio = new AudioVisualizationData();
+                var samples = new float[1024];
+                for (var frame = 0; frame < 512; frame++)
+                {
+                    samples[frame * 2] = (float)(.43 * Math.Sin(frame * Math.PI / 24));
+                    samples[frame * 2 + 1] = (float)(.31 * Math.Sin(frame * Math.PI / 19));
+                }
+                audio.Update(samples, 512, 2, 48000);
+                audio.SetChannelSpectrum(leftPower, rightPower);
+                audio.SetSevenBandPower(new[] { .005, .025, .06, .018, .009, .003, .0006 });
+                using var control = new AdvancedVisualizationControl { Size = size, Mode = ResolveAdvancedMode(selection.Mode),
+                    Style = VisualStyles.Parse(selection.Style), ShowGuides = guides };
+                control.ApplyTheme(theme);
+                control.SetAudioData(audio);
+                for (var frame = 0; frame < (name == "History" ? 48 : 2); frame++)
+                {
+                    for (var band = 0; band < BAR_COUNT; band++)
+                        levels[band] = LevelScale.ToDisplayByte(-42 + 21 * Math.Sin(band * .065 + frame * .09) + 9 * Math.Sin(band * .29));
+                    control.SetSpectrum(levels);
+                }
+                control.SettlePreviewBallistics();
+                control.DisplayFrozen = true;
+                control.DrawToBitmap(image, new Rectangle(Point.Empty, size));
+            }
+            else
+            {
+                using (var backgroundGraphics = Graphics.FromImage(image)) backgroundGraphics.Clear(theme.Ui.VisualizationSurface);
+                var plotHeight = size.Height - 34;
+                for (var band = 0; band < BAR_COUNT; band++)
+                {
+                    var x = 8 + band * (size.Width - 16) / BAR_COUNT;
+                    var right = 8 + (band + 1) * (size.Width - 16) / BAR_COUNT;
+                    using var bar = new VerticalProgressBar { Minimum = 0, Maximum = 255, Size = new Size(Math.Max(1, right - x), plotHeight),
+                        Tag = selection.Mode + "|" + (band + 1), Visible = false };
+                    ApplyMeterPresetOptimized(bar, selection.Mode);
+                    ApplyColorThemeOptimized(bar, theme);
+                    bar.ApplyThemeChrome(theme.Ui);
+                    bar.ShowGuides = guides;
+                    bar.VisualStyle = VisualStyles.Parse(selection.Style);
+                    bar.Value = levels[band];
+                    bar.Visible = true;
+                    bar.DrawToBitmap(image, new Rectangle(x, 4, bar.Width, plotHeight));
+                }
+                using var graphics = Graphics.FromImage(image);
+                var previousRight = int.MinValue;
+                var endWidth = TextRenderer.MeasureText("20k", Font).Width;
+                foreach (var frequency in SpectrumAxis.Frequencies)
+                {
+                    var label = SpectrumAxis.FrequencyLabel(frequency);
+                    var labelWidth = TextRenderer.MeasureText(label, Font).Width;
+                    var center = 8 + (int)Math.Round((size.Width - 16) * SpectrumAxis.Position(frequency));
+                    var x = Math.Max(0, Math.Min(size.Width - labelWidth, center - labelWidth / 2));
+                    if (x < previousRight + 4 || frequency < 20000 && x + labelWidth + 4 > size.Width - endWidth) continue;
+                    TextRenderer.DrawText(graphics, label, Font, new Rectangle(x, size.Height - 26, labelWidth, 24),
+                        theme.Ui.SecondaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+                    previousRight = x + labelWidth;
+                }
+            }
+            return image;
+        }
+        catch { image.Dispose(); throw; }
+    }
+
+    internal void ApplyPreset(string name)
+    {
+        var selection = GetPresetSelection(name);
+        var mode = selection.Mode;
+        var effect = selection.Style;
+        var palette = selection.Theme;
+        var guides = name != "Retro Bricks" && name != "Ambient Radial";
+        _showGuides = guides;
+        _effectFallbackMessage = null;
+        _applyingRandomSelection = true;
+        try
+        {
+            _modeSelector.SelectedItem = mode;
+            _styleSelector.SelectedItem = effect;
+            _themeSelector.SelectedItem = palette;
+            _visualStyle = effect;
+            if (_progressBars != null) ApplyVisualStyle();
+        }
+        finally { _applyingRandomSelection = false; }
+        UpdateUtilityButtons();
+        ResetRotationTimer();
+        UpdateCaptureStatus();
+        SaveVisualPreferences(true);
+    }
+
+    private void ShowViewMenu()
+    {
+        if (_isDisposed || IsDisposed || Disposing) return;
+        // Drop-down owners outlive activation changes inside WinForms' modal menu filter.
+        // Reuse this form-owned menu and dispose it only when the form is cleaned up.
+        var menu = _viewMenu ??= CreateViewMenu();
+        if (menu.Visible) { menu.Close(); return; }
+        var ui = CurrentTheme().Ui;
+        var renderer = new MenuRenderer(ui);
+        void Prepare(ToolStripDropDown dropDown)
+        {
+            dropDown.Font = ambiance_ThemeSpectrum.Font;
+            dropDown.Renderer = renderer;
+            dropDown.BackColor = ui.ControlSurface;
+            dropDown.ForeColor = ui.PrimaryText;
+            if (dropDown is ToolStripDropDownMenu choices)
+            {
+                choices.ShowImageMargin = false;
+                choices.ShowCheckMargin = true;
+            }
+            foreach (ToolStripItem entry in dropDown.Items)
+            {
+                entry.BackColor = ui.ControlSurface;
+                entry.ForeColor = ui.PrimaryText;
+                if (entry is ToolStripMenuItem child)
+                {
+                    if (child.Tag is Func<bool> isChecked) child.Checked = isChecked();
+                    if (child.HasDropDownItems) Prepare(child.DropDown);
+                }
+            }
+        }
+        Prepare(menu);
+        menu.Show(_viewButton, new Point(0, _viewButton.Height));
+    }
+
+    private ContextMenuStrip CreateViewMenu()
+    {
+        var menu = new ContextMenuStrip { Font = ambiance_ThemeSpectrum.Font, ShowImageMargin = false };
+        var browse = new ToolStripMenuItem("Browse modes by purpose");
+        foreach (var group in new[] { "Analyze", "Stereo and waveform", "History and change", "Inspect and monitor", "Creative" })
+        {
+            var category = new ToolStripMenuItem(group);
+            foreach (var mode in s_visualModes)
+            {
+                if (ModeGroup(mode) != group) continue;
+                var captured = mode;
+                var item = new ToolStripMenuItem(DisplayChoice(mode, false, false)) { Tag = (Func<bool>)(() => _visualMode == captured) };
+                item.Click += (sender, args) => _modeSelector.SelectedItem = captured;
+                category.DropDownItems.Add(item);
+            }
+            browse.DropDownItems.Add(category);
+        }
+        menu.Items.Add(browse);
+        menu.Items.Add("Search modes\u2026", null, (sender, args) => ShowModeSearch());
+        var presets = new ToolStripMenuItem("Presets");
+        foreach (var preset in PresetNames)
+        {
+            var captured = preset;
+            presets.DropDownItems.Add(preset, null, (sender, args) => ApplyPreset(captured));
+        }
+        presets.DropDownItems.Add(new ToolStripSeparator());
+        presets.DropDownItems.Add("Preview and choose preset\u2026", null, (sender, args) => ShowPresetBrowser());
+        menu.Items.Add(presets);
+        var appearance = new ToolStripMenuItem("Appearance");
+        foreach (var name in new[] { "Palette", "System", "Dark", "Light", "High Contrast" })
+        {
+            var captured = name;
+            var item = new ToolStripMenuItem(name == "Palette" ? "Follow palette" : name) { Tag = (Func<bool>)(() => _appearance == captured) };
+            item.Click += (sender, args) => SetAppearance(captured);
+            appearance.DropDownItems.Add(item);
+        }
+        menu.Items.Add(appearance);
+        var controls = new ToolStripMenuItem("Display controls");
+        controls.DropDownItems.Add("Rotation settings\u2026  Ctrl+R", null, (sender, args) => ShowRotationSettings());
+        var guides = new ToolStripMenuItem("Reference guides  Ctrl+G") { Tag = (Func<bool>)(() => _showGuides) };
+        guides.Click += (sender, args) => ToggleGuides();
+        controls.DropDownItems.Add(guides);
+        var freeze = new ToolStripMenuItem("Freeze display  Ctrl+Space") { Tag = (Func<bool>)(() => _displayFrozen) };
+        freeze.Click += (sender, args) => SetDisplayFrozen(!_displayFrozen);
+        controls.DropDownItems.Add(freeze);
+        var pin = new ToolStripMenuItem("Keep on top  F12") { Tag = (Func<bool>)(() => TopMost) };
+        pin.Click += (sender, args) => TogglePin();
+        controls.DropDownItems.Add(pin);
+        menu.Items.Add(controls);
+        var range = new ToolStripMenuItem("Band change range");
+        foreach (var value in new[] { 6, 12, 24, 72 })
+        {
+            var captured = value;
+            var item = new ToolStripMenuItem($"\u00B1{value} dB") { Tag = (Func<bool>)(() => _advancedVisualizer?.DeltaRangeDb == captured) };
+            item.Click += (sender, args) => { if (_advancedVisualizer != null) _advancedVisualizer.DeltaRangeDb = captured; };
+            range.DropDownItems.Add(item);
+        }
+        menu.Items.Add(range);
+        var threshold = new ToolStripMenuItem("Monitoring threshold");
+        foreach (var value in new[] { -12, -18, -24, -36, -48 })
+        {
+            var captured = value;
+            var item = new ToolStripMenuItem($"{value} dBFS") { Tag = (Func<bool>)(() => _advancedVisualizer?.ThresholdDb == captured) };
+            item.Click += (sender, args) =>
+            {
+                if (_advancedVisualizer == null) return;
+                _advancedVisualizer.ThresholdDb = captured;
+                UpdateModeDescription();
+            };
+            threshold.DropDownItems.Add(item);
+        }
+        menu.Items.Add(threshold);
+        var octaveValues = new ToolStripMenuItem("Octave spectrum values") { Tag = (Func<bool>)(() => _advancedVisualizer?.ShowOctaveValues == true) };
+        octaveValues.Click += (sender, args) =>
+        {
+            if (_advancedVisualizer != null) _advancedVisualizer.ShowOctaveValues = !_advancedVisualizer.ShowOctaveValues;
+        };
+        menu.Items.Add(octaveValues);
+        var resolution = new ToolStripMenuItem("Waterfall resolution");
+        foreach (var coarse in new[] { false, true })
+        {
+            var captured = coarse ? "Octave Waterfall" : "Waterfall";
+            var item = new ToolStripMenuItem(coarse ? "Coarse - octave groups" : "Fine - 83 frequency bands") { Tag = (Func<bool>)(() => _visualMode == captured) };
+            item.Click += (sender, args) => _modeSelector.SelectedItem = captured;
+            resolution.DropDownItems.Add(item);
+        }
+        menu.Items.Add(resolution);
+        var strength = new ToolStripMenuItem("Effect intensity");
+        foreach (var choice in new[] { ("Subtle", .35f), ("Standard", .6f), ("Strong", 1f) })
+        {
+            var captured = choice.Item2;
+            var item = new ToolStripMenuItem(choice.Item1) { Tag = (Func<bool>)(() => Math.Abs(_effectStrength - captured) < .01f) };
+            item.Click += (sender, args) =>
+            {
+                _effectStrength = captured;
+                if (_advancedVisualizer != null) _advancedVisualizer.EffectStrength = captured;
+                if (_progressBars != null) foreach (var progress in _progressBars) progress.EffectStrength = captured;
+            };
+            strength.DropDownItems.Add(item);
+        }
+        menu.Items.Add(strength);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Save image\u2026  Ctrl+S", null, (sender, args) => SaveVisualizationImage());
+        menu.Items.Add("Capture details\u2026", null, (sender, args) => MessageBox.Show(this, _captureStatusLabel.AccessibleDescription,
+            "Audio capture", MessageBoxButtons.OK, MessageBoxIcon.Information));
+        return menu;
+    }
+
+    internal void SetAppearance(string appearance)
+    {
+        _appearance = VisualPreferenceSnapshot.ResolveAppearance(appearance);
+        ApplyCurrentAppearance();
+        SaveVisualPreferences(true);
+    }
+
+    private void ApplyCurrentAppearance()
+    {
+        var theme = CurrentTheme();
+        if (_advancedVisualizer != null) _advancedVisualizer.ApplyTheme(theme);
+        if (_progressBars != null)
+            foreach (var progress in _progressBars)
+            {
+                ApplyColorThemeOptimized(progress, theme);
+                progress.ApplyThemeChrome(theme.Ui);
+            }
+        ApplyThemeChrome(theme);
+    }
+
+    // SystemEvents may arrive on its own thread, after a window has begun closing.
+    private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs args)
+    {
+        if (_isDisposed || IsDisposed || Disposing || !IsHandleCreated) return;
+        try
+        {
+            BeginInvoke(new Action(() =>
+            {
+                if (!_isDisposed && !IsDisposed && !Disposing && _appearance == "System")
+                    ApplyCurrentAppearance();
+            }));
+        }
+        catch (InvalidOperationException) when (_isDisposed || IsDisposed || Disposing || !IsHandleCreated) { }
+    }
+
+    private void ShowModeSearch()
+    {
+        using var dialog = new Form { Text = "Find a visualization", StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(460, 390), MinimizeBox = false, MaximizeBox = false,
+            FormBorderStyle = FormBorderStyle.FixedDialog, Font = ambiance_ThemeSpectrum.Font, AutoScaleMode = AutoScaleMode.Font };
+        var ui = CurrentTheme().Ui;
+        dialog.BackColor = ui.Surface;
+        dialog.ForeColor = ui.PrimaryText;
+        var search = new TextBox { AccessibleName = "Search modes", Dock = DockStyle.Top, Margin = new Padding(10) };
+        var list = new ListBox { AccessibleName = "Matching visualizations", Dock = DockStyle.Fill,
+            BackColor = ui.ControlSurface, ForeColor = ui.PrimaryText, IntegralHeight = false };
+        var choose = new Button { Text = "Open view", AutoSize = true, Height = 32, DialogResult = DialogResult.OK,
+            FlatStyle = FlatStyle.Flat, BackColor = ui.ControlSurface, ForeColor = ui.PrimaryText };
+        var cancel = new Button { Text = "Cancel", AutoSize = true, Height = 32, DialogResult = DialogResult.Cancel,
+            FlatStyle = FlatStyle.Flat, BackColor = ui.ControlSurface, ForeColor = ui.PrimaryText };
+        cancel.FlatAppearance.BorderColor = ui.Divider;
+        cancel.FlatAppearance.MouseOverBackColor = ui.Hover;
+        var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true,
+            FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(4) };
+        footer.Controls.Add(cancel);
+        footer.Controls.Add(choose);
+        choose.FlatAppearance.BorderColor = ui.Divider;
+        choose.FlatAppearance.MouseOverBackColor = ui.Hover;
+        search.BackColor = ui.ControlSurface;
+        search.ForeColor = ui.PrimaryText;
+        var description = new Label { Name = "modeDescription", AccessibleName = "Selected mode purpose", Dock = DockStyle.Bottom,
+            Height = 76, Padding = new Padding(6), ForeColor = ui.PrimaryText };
+        var names = new List<string>();
+        list.SelectedIndexChanged += (sender, args) => description.Text = list.SelectedIndex < 0
+            ? string.Empty : GetModeDescription(names[list.SelectedIndex]);
+        void Filter()
+        {
+            names.Clear(); list.Items.Clear();
+            foreach (var mode in s_visualModes)
+            {
+                var label = DisplayChoice(mode, false, false);
+                if ((ModeGroup(mode) + " " + label).IndexOf(search.Text.Trim(), StringComparison.CurrentCultureIgnoreCase) < 0) continue;
+                names.Add(mode); list.Items.Add(ModeGroup(mode) + " \u00B7 " + label);
+            }
+            if (list.Items.Count > 0) list.SelectedIndex = 0;
+            choose.Enabled = list.Items.Count > 0;
+        }
+        search.TextChanged += (sender, args) => Filter();
+        list.DoubleClick += (sender, args) => { if (list.SelectedIndex >= 0) dialog.DialogResult = DialogResult.OK; };
+        dialog.Controls.Add(list); dialog.Controls.Add(search); dialog.Controls.Add(description); dialog.Controls.Add(footer);
+        dialog.AcceptButton = choose;
+        dialog.CancelButton = cancel;
+        Filter();
+        if (dialog.ShowDialog(this) == DialogResult.OK && list.SelectedIndex >= 0)
+            _modeSelector.SelectedItem = names[list.SelectedIndex];
+    }
+
+    private void SaveVisualizationImage()
+    {
+        using var dialog = new System.Windows.Forms.SaveFileDialog { Filter = "PNG image|*.png", DefaultExt = "png", AddExtension = true,
+            FileName = $"Spectrum-{DateTime.Now:yyyyMMdd-HHmmss}.png", Title = "Save Spectrum image" };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            SaveVisualizationImageTo(dialog.FileName);
+        }
+        catch (Exception error) when (error is IOException || error is UnauthorizedAccessException || error is System.Runtime.InteropServices.ExternalException)
+        {
+            MessageBox.Show(this, "The image could not be saved. " + error.Message, "Save image", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    internal void SaveVisualizationImageTo(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("An image path is required.", nameof(path));
+        using var bitmap = new Bitmap(ClientSize.Width, ClientSize.Height);
+        DrawToBitmap(bitmap, ClientRectangle);
+        bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    private sealed class MenuRenderer : ToolStripProfessionalRenderer
+    {
+        private readonly VisualTheme _ui;
+        internal MenuRenderer(VisualTheme ui) : base(new MenuColors(ui)) { _ui = ui; }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs args)
+        {
+            using var background = new SolidBrush(args.Item.Selected || args.Item.Pressed ? _ui.Selection : _ui.ControlSurface);
+            args.Graphics.FillRectangle(background, new Rectangle(Point.Empty, args.Item.Size));
+            if ((args.Item.Selected || args.Item.Pressed) && args.Item.Width > 1 && args.Item.Height > 1)
+            {
+                using var border = new Pen(_ui.Focus);
+                args.Graphics.DrawRectangle(border, 0, 0, args.Item.Width - 1, args.Item.Height - 1);
+            }
+        }
+
+        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs args)
+        {
+            args.ArrowColor = _ui.PrimaryText;
+            base.OnRenderArrow(args);
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs args)
+        {
+            args.TextColor = args.Item.Enabled ? _ui.PrimaryText : _ui.DisabledText;
+            base.OnRenderItemText(args);
+        }
+
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs args)
+        {
+            var bounds = args.ImageRectangle;
+            using var pen = new Pen(_ui.PrimaryText, 2f);
+            args.Graphics.DrawLines(pen, new[]
+            {
+                new Point(bounds.Left + bounds.Width / 5, bounds.Top + bounds.Height / 2),
+                new Point(bounds.Left + bounds.Width * 2 / 5, bounds.Top + bounds.Height * 3 / 4),
+                new Point(bounds.Left + bounds.Width * 4 / 5, bounds.Top + bounds.Height / 4)
+            });
+        }
+    }
+
+    private sealed class MenuColors : ProfessionalColorTable
+    {
+        private readonly VisualTheme _ui;
+        internal MenuColors(VisualTheme ui) { _ui = ui; UseSystemColors = false; }
+        public override Color ToolStripDropDownBackground => _ui.ControlSurface;
+        public override Color MenuBorder => _ui.Divider;
+        public override Color MenuItemBorder => _ui.Focus;
+        public override Color MenuItemSelected => _ui.Selection;
+        public override Color MenuItemSelectedGradientBegin => _ui.Selection;
+        public override Color MenuItemSelectedGradientEnd => _ui.Selection;
+        public override Color MenuItemPressedGradientBegin => _ui.Selection;
+        public override Color MenuItemPressedGradientMiddle => _ui.Selection;
+        public override Color MenuItemPressedGradientEnd => _ui.Selection;
+        public override Color CheckBackground => _ui.Selection;
+        public override Color CheckSelectedBackground => _ui.Selection;
+        public override Color CheckPressedBackground => _ui.Selection;
+        public override Color SeparatorDark => _ui.Divider;
+        public override Color SeparatorLight => _ui.ControlSurface;
+        public override Color ImageMarginGradientBegin => _ui.ControlSurface;
+        public override Color ImageMarginGradientMiddle => _ui.ControlSurface;
+        public override Color ImageMarginGradientEnd => _ui.ControlSurface;
+    }
+
+    // Preserve native keyboard and accessibility behavior while theming the arrow and frame.
+    private sealed class ModernSelector : ComboBox
+    {
+        internal Color BorderColor { get; set; } = SystemColors.ControlDark;
+        internal Color FocusBorderColor { get; set; } = SystemColors.Highlight;
+        protected override void OnGotFocus(EventArgs args) { base.OnGotFocus(args); Invalidate(); }
+        protected override void OnLostFocus(EventArgs args) { base.OnLostFocus(args); Invalidate(); }
+        protected override void OnDropDown(EventArgs args) { base.OnDropDown(args); Invalidate(); }
+        protected override void OnDropDownClosed(EventArgs args) { base.OnDropDownClosed(args); Invalidate(); }
+
+        protected override void WndProc(ref Message message)
+        {
+            base.WndProc(ref message);
+            if (!IsHandleCreated || Width < 20) return;
+            if (message.Msg == 0x000F)
+            {
+                using var graphics = Graphics.FromHwnd(Handle);
+                PaintChrome(graphics);
+            }
+            else if ((message.Msg == 0x0317 || message.Msg == 0x0318) && message.WParam != IntPtr.Zero)
+            {
+                // DrawToBitmap/WM_PRINT must receive the same chrome as the visible window.
+                using var graphics = Graphics.FromHdc(message.WParam);
+                PaintChrome(graphics);
+            }
+        }
+
+        private void PaintChrome(Graphics graphics)
+        {
+            var right = new Rectangle(Width - SystemInformation.VerticalScrollBarWidth - 2, 1, SystemInformation.VerticalScrollBarWidth + 1, Height - 2);
+            using var background = new SolidBrush(BackColor);
+            graphics.FillRectangle(background, right);
+            var center = right.Left + right.Width / 2;
+            using var arrow = new SolidBrush(Enabled ? ForeColor : SystemColors.GrayText);
+            graphics.FillPolygon(arrow, new[] { new Point(center - 4, Height / 2 - 2), new Point(center + 4, Height / 2 - 2), new Point(center, Height / 2 + 2) });
+            using var border = new Pen(Focused || DroppedDown ? FocusBorderColor : BorderColor);
+            graphics.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+            graphics.DrawRectangle(border, 1, 1, Width - 3, Height - 3);
+        }
+    }
+
     private ComboBox CreateSelector(string name, int width, string[] choices, bool isThemeSelector, bool isStyleSelector = false)
     {
-        var selector = new ComboBox
+        var selector = new ModernSelector
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
             DrawMode = DrawMode.OwnerDrawFixed,
@@ -416,7 +1148,7 @@ public partial class FormAudioSpectrum : Form
             return;
 
         var selected = (e.State & DrawItemState.Selected) != 0;
-        var ui = BarColorThemes.Resolve(_barTheme).Ui;
+        var ui = CurrentTheme().Ui;
         var background = selected ? ui.Selection : ui.ControlSurface;
         using var backgroundBrush = new SolidBrush(background);
         e.Graphics.FillRectangle(backgroundBrush, e.Bounds);
@@ -428,7 +1160,7 @@ public partial class FormAudioSpectrum : Form
         var textLeft = e.Bounds.Left + (int)Math.Ceiling(8 * scale);
         if (isThemeSelector)
         {
-            var theme = BarColorThemes.Resolve(choice);
+            var theme = BarColorThemes.ApplyAppearance(BarColorThemes.Resolve(choice), _appearance);
             var swatchWidth = (int)Math.Ceiling(30 * scale);
             var swatchHeight = Math.Max(4, e.Bounds.Height - (int)Math.Ceiling(12 * scale));
             var swatch = new Rectangle(e.Bounds.Left + (int)Math.Ceiling(7 * scale),
@@ -452,20 +1184,20 @@ public partial class FormAudioSpectrum : Form
             var state = e.Graphics.Save();
             e.Graphics.TranslateTransform(icon.Left, icon.Top);
             e.Graphics.ScaleTransform(scale, scale);
-            DrawStyleIcon(e.Graphics, choice, new Rectangle(0, 0, 20, 14), _barTheme);
+            DrawStyleIconCore(e.Graphics, choice, new Rectangle(0, 0, 20, 14), CurrentTheme().High);
             e.Graphics.Restore(state);
             textLeft = e.Bounds.Left + GetSelectorTextInset(selector.Font, false);
         }
         else
         {
-            var theme = BarColorThemes.Resolve(_barTheme);
+            var theme = CurrentTheme();
             var iconHeight = (int)Math.Ceiling(14 * scale);
             DrawModeIcon(e.Graphics, choice, new Rectangle(e.Bounds.Left + (int)Math.Ceiling(7 * scale),
                 e.Bounds.Top + (e.Bounds.Height - iconHeight) / 2, (int)Math.Ceiling(20 * scale), iconHeight), theme.High);
             textLeft = e.Bounds.Left + GetSelectorTextInset(selector.Font, false);
         }
 
-        TextRenderer.DrawText(e.Graphics, choice, selector.Font,
+        TextRenderer.DrawText(e.Graphics, DisplayChoice(choice, isThemeSelector, isStyleSelector), selector.Font,
             new Rectangle(textLeft, e.Bounds.Top, Math.Max(0, e.Bounds.Right - textLeft - 4), e.Bounds.Height),
             ui.PrimaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         if (selected && e.Bounds.Width > 0 && e.Bounds.Height > 0)
@@ -476,9 +1208,11 @@ public partial class FormAudioSpectrum : Form
         }
     }
 
-    private static void DrawStyleIcon(Graphics graphics, string style, Rectangle bounds, string themeName)
+    private static void DrawStyleIcon(Graphics graphics, string style, Rectangle bounds, string themeName) =>
+        DrawStyleIconCore(graphics, style, bounds, BarColorThemes.Resolve(themeName).High);
+
+    private static void DrawStyleIconCore(Graphics graphics, string style, Rectangle bounds, Color color)
     {
-        var color = BarColorThemes.Resolve(themeName).High;
         using var pen = new Pen(color, 1.5f);
         using var brush = new SolidBrush(color);
         if (string.Equals(style, "Pulse", StringComparison.OrdinalIgnoreCase))
@@ -500,6 +1234,9 @@ public partial class FormAudioSpectrum : Form
         {
             switch (style)
             {
+                case "Outline":
+                    graphics.DrawRectangle(pen, bounds.Left + 3, bounds.Top + 2, bounds.Width - 6, bounds.Height - 4);
+                    break;
                 case "Trail":
                     for (var i = 0; i < 3; i++)
                     {
@@ -555,6 +1292,18 @@ public partial class FormAudioSpectrum : Form
         using var brush = new SolidBrush(color);
         switch (mode)
         {
+            case "Overview":
+                graphics.DrawRectangle(pen, 1, 1, 13, 15);
+                graphics.DrawLines(pen, new[] { new Point(2, 13), new Point(6, 5), new Point(10, 10), new Point(13, 4) });
+                graphics.FillRectangle(brush, 17, 7, 2, 9);
+                graphics.FillRectangle(brush, 21, 3, 2, 13);
+                break;
+            case "Stereo Compare":
+                graphics.DrawLine(pen, 1, 16, 23, 16);
+                graphics.DrawLines(pen, new[] { new Point(2, 14), new Point(8, 3), new Point(14, 9), new Point(22, 5) });
+                using (var second = new Pen(color, 1.6f) { DashStyle = DashStyle.Dash })
+                    graphics.DrawLines(second, new[] { new Point(2, 10), new Point(8, 8), new Point(14, 2), new Point(22, 12) });
+                break;
             case "Spectrum":
                 DrawIconBars(graphics, brush, new[] { 5, 10, 14, 8, 11 });
                 break;
@@ -685,7 +1434,9 @@ public partial class FormAudioSpectrum : Form
             var width = ambiance_ThemeSpectrum.ClientSize.Width;
             ambiance_ControlBox.Location = new Point(Math.Max(0, width - ambiance_ControlBox.Width - 8), 8);
             // old-style chrome stays a fixed size even when WinForms scales the children
-            var windowButtons = new[] { "closeButton", "minimizeButton", "maximizeButton" };
+            var windowButtons = ambiance_ControlBox.EnableMaximize
+                ? new[] { "minimizeButton", "maximizeButton", "closeButton" }
+                : new[] { "minimizeButton", "closeButton", "maximizeButton" };
             for (var i = 0; i < windowButtons.Length; i++)
                 if (ambiance_ControlBox.Controls[windowButtons[i]] is Button windowButton)
                     windowButton.Bounds = new Rectangle(i * 22, 0, 20, 22);
@@ -706,7 +1457,7 @@ public partial class FormAudioSpectrum : Form
                     : SystemInformation.VerticalScrollBarWidth + 6;
                 var textWidth = 0;
                 foreach (string item in selector.Items)
-                    textWidth = Math.Max(textWidth, TextRenderer.MeasureText(item, selector.Font).Width);
+                    textWidth = Math.Max(textWidth, TextRenderer.MeasureText(DisplayChoice(item, i == 2, i == 1), selector.Font).Width);
                 selector.Width = Math.Max((int)Math.Ceiling(minimumWidths[i] * scale),
                     textWidth + GetSelectorTextInset(selector.Font, i == 2) + arrowAndBorder + 6);
                 selector.DropDownWidth = Math.Max(selector.Width, (int)Math.Ceiling(240 * scale));
@@ -715,9 +1466,45 @@ public partial class FormAudioSpectrum : Form
             }
             _rotationSettingsButton.Visible = true;
             _rotationSettingsButton.Width = Math.Max((int)Math.Ceiling(88 * scale),
-                TextRenderer.MeasureText("Random 240m", _rotationSettingsButton.Font).Width + (int)Math.Ceiling(16 * scale));
+                TextRenderer.MeasureText("Rotation: Random 240m", _rotationSettingsButton.Font).Width + (int)Math.Ceiling(16 * scale));
             _rotationSettingsButton.Height = rowHeight;
             controlsWidth += _rotationSettingsButton.Width + _rotationSettingsButton.Margin.Horizontal;
+            foreach (var utility in new[] { _guidesButton, _freezeButton, _pinButton, _viewButton })
+            {
+                if (utility == null) continue;
+                utility.Width = TextRenderer.MeasureText(utility.Text, utility.Font).Width + (int)Math.Ceiling(18 * scale);
+                utility.Height = rowHeight;
+                controlsWidth += utility.Width + utility.Margin.Horizontal;
+            }
+            // Overflow secondary controls before they consume the compact plot viewport.
+            // Native mode/effect/palette selectors and the View entry point always remain.
+            var availableRowWidth = Math.Max(1, width - 24);
+            var estimatedRows = 1;
+            var estimatedRowWidth = 0;
+            foreach (var control in new Control[] { _modeSelector, _styleSelector, _themeSelector,
+                _rotationSettingsButton, _guidesButton, _freezeButton, _pinButton, _viewButton })
+            {
+                if (control == null) continue;
+                var occupied = control.Width + control.Margin.Horizontal;
+                if (estimatedRowWidth > 0 && estimatedRowWidth + occupied > availableRowWidth)
+                {
+                    estimatedRows++;
+                    estimatedRowWidth = 0;
+                }
+                estimatedRowWidth += occupied;
+            }
+            var toolbarBudget = Math.Max(rowHeight, (ambiance_ThemeSpectrum.ClientSize.Height - 40) / 4);
+            _compactToolbar = ambiance_ThemeSpectrum.ClientSize.Height <= 350 || estimatedRows * rowHeight > toolbarBudget;
+            foreach (var secondary in new[] { _rotationSettingsButton, _guidesButton, _freezeButton, _pinButton })
+            {
+                if (secondary == null) continue;
+                secondary.Visible = !_compactToolbar;
+                if (_compactToolbar) controlsWidth -= secondary.Width + secondary.Margin.Horizontal;
+            }
+            if (_viewButton != null)
+                _selectionToolTip.SetToolTip(_viewButton, _compactToolbar
+                    ? "View and display controls: rotation, guides, freeze, pin, presets and appearance. All keyboard shortcuts remain available."
+                    : "Browse modes, presets, appearance, display controls and save an image");
             var titleWidth = TextRenderer.MeasureText("Audio Spectrum Analyzer", ambiance_ThemeSpectrum.Font).Width;
             var inline = rowHeight <= 29 && controlsWidth + ambiance_ControlBox.Width + titleWidth + 40 <= width;
             var labels = new[] { _modeSelectorLabel, _styleSelectorLabel, _themeSelectorLabel };
@@ -801,6 +1588,7 @@ public partial class FormAudioSpectrum : Form
         var normalized = configuredValue.Trim();
         switch (normalized.ToLowerInvariant())
         {
+            case "band level change":
             case "spectral flux":
                 return "Level Change";
             case "transient map":
@@ -887,6 +1675,8 @@ public partial class FormAudioSpectrum : Form
     {
         switch ((mode ?? string.Empty).Trim().ToLowerInvariant())
         {
+            case "overview": return AdvancedVisualizationMode.Overview;
+            case "stereo compare": return AdvancedVisualizationMode.StereoCompare;
             case "waterfall":
                 return AdvancedVisualizationMode.Waterfall;
             case "radial spectrum":
@@ -930,8 +1720,18 @@ public partial class FormAudioSpectrum : Form
         var previousMode = _visualMode;
         _visualMode = mode;
         UpdateModeDescription();
+        var previousEffect = _visualStyle;
         _visualStyle = GetAppliedVisualStyle(_visualMode, _visualStyle);
-        var theme = BarColorThemes.Resolve(_barTheme);
+        if (!_applyingRandomSelection)
+        {
+            _effectFallbackMessage = previousEffect != _visualStyle && previousEffect != "None"
+                ? $"{DisplayChoice(previousEffect, false, true)} is unavailable in {DisplayChoice(mode, false, false)}. Effect: None. Guides remain independent."
+                : null;
+            if (_effectFallbackMessage != null)
+                _selectionToolTip.Show(_effectFallbackMessage, _styleSelector, 4500);
+            UpdateCaptureStatus();
+        }
+        var theme = CurrentTheme();
         for (var i = 0; i < _progressBars.Length; i++)
         {
             var progress = _progressBars[i];
@@ -959,7 +1759,10 @@ public partial class FormAudioSpectrum : Form
             return;
 
         _visualStyle = GetAppliedVisualStyle(_visualMode, style);
+        _effectFallbackMessage = null;
         ApplyVisualStyle();
+        UpdateEffectHelp();
+        UpdateCaptureStatus();
         if (!_applyingRandomSelection)
             SaveVisualPreferences();
     }
@@ -970,10 +1773,13 @@ public partial class FormAudioSpectrum : Form
         foreach (var progress in _progressBars)
         {
             progress.VisualStyle = style;
+            progress.ShowGuides = _showGuides;
             progress.Invalidate();
         }
 
         _advancedVisualizer.Style = style;
+        _advancedVisualizer.ShowGuides = _showGuides;
+        UpdateEffectHelp();
     }
 
     private void UpdateStyleSelector()
@@ -982,7 +1788,7 @@ public partial class FormAudioSpectrum : Form
         _initializingSelectors = true;
         try
         {
-            var choices = VisualStyles.GetSupportedNames(_visualMode);
+            var choices = VisualStyles.GetEffectNames(_visualMode);
             _styleSelector.Items.Clear();
             foreach (var choice in choices)
                 _styleSelector.Items.Add(choice);
@@ -991,9 +1797,11 @@ public partial class FormAudioSpectrum : Form
             _styleSelector.Enabled = supported;
             _styleSelector.AccessibleDescription = supported
                 ? "Optional visual emphasis available for this mode."
-                : $"Styles are unavailable for {_visualMode}; None is applied.";
+                : $"Decorative effects are unavailable for {_visualMode}; None is applied. Reference guides remain independently available.";
             _visualStyle = GetAppliedVisualStyle(_visualMode, _visualStyle);
+            if (_visualStyle == "Precision" || _visualStyle == "Scanline") _visualStyle = "None";
             _styleSelector.SelectedItem = _visualStyle;
+            UpdateEffectHelp();
         }
         finally
         {
@@ -1007,7 +1815,7 @@ public partial class FormAudioSpectrum : Form
             return;
 
         _barTheme = themeName;
-        var theme = BarColorThemes.Resolve(themeName);
+        var theme = CurrentTheme();
         _advancedVisualizer.ApplyTheme(theme);
         foreach (var progress in _progressBars)
         {
@@ -1016,6 +1824,7 @@ public partial class FormAudioSpectrum : Form
             progress.Invalidate();
         }
         ApplyThemeChrome(theme);
+        UpdatePaletteHelp();
         if (!_applyingRandomSelection)
             SaveVisualPreferences();
         ResetRotationTimer();
@@ -1023,7 +1832,7 @@ public partial class FormAudioSpectrum : Form
 
     private void ShowRotationSettings()
     {
-        using var dialog = new RotationSettingsForm(_randomRotationEnabled, _rotationIntervalMinutes, BarColorThemes.Resolve(_barTheme));
+        using var dialog = new RotationSettingsForm(_randomRotationEnabled, _rotationIntervalMinutes, CurrentTheme());
         if (dialog.ShowDialog(this) != DialogResult.OK)
             return;
 
@@ -1047,10 +1856,9 @@ public partial class FormAudioSpectrum : Form
         if (_rotationSettingsButton == null)
             return;
 
-        var compact = ambiance_ThemeSpectrum.ClientSize.Width < 800;
         _rotationSettingsButton.Text = !_randomRotationEnabled
-            ? "Fixed"
-            : compact ? "Random" : $"Random {_rotationIntervalMinutes}m";
+            ? "Rotation: Fixed"
+            : $"Rotation: Random {_rotationIntervalMinutes}m";
         _rotationSettingsButton.AccessibleDescription = _randomRotationEnabled
             ? $"Random mode, style, and theme selection, changing every {_rotationIntervalMinutes} minutes. Press Ctrl+R to change."
             : "Fixed mode, style, and theme selection. Press Ctrl+R to change.";
@@ -1064,7 +1872,7 @@ public partial class FormAudioSpectrum : Form
             _rotationTimer.Tick += RotationTimer_Tick;
         }
 
-        if (_randomRotationEnabled)
+        if (_randomRotationEnabled && !_displayFrozen)
         {
             _rotationTimer.Stop();
             _rotationTimer.Interval = GetRotationIntervalMilliseconds(_rotationIntervalMinutes);
@@ -1079,7 +1887,7 @@ public partial class FormAudioSpectrum : Form
 
     private void ResetRotationTimer()
     {
-        if (!_randomRotationEnabled || _rotationTimer == null)
+        if (!_randomRotationEnabled || _rotationTimer == null || _displayFrozen)
             return;
         _rotationTimer.Stop();
         _rotationTimer.Start();
@@ -1087,6 +1895,7 @@ public partial class FormAudioSpectrum : Form
 
     private void RotationTimer_Tick(object sender, EventArgs e)
     {
+        if (_displayFrozen) return;
         RandomizeVisualSelection(_random);
         SaveVisualPreferences(automatic: true);
     }
@@ -1104,10 +1913,11 @@ public partial class FormAudioSpectrum : Form
         try
         {
             // set everything first, then notify, so nobody sees a half-applied state
+            _effectFallbackMessage = null;
             _visualMode = selection.Mode;
             _visualStyle = selection.Style;
             _barTheme = selection.Theme;
-            var theme = BarColorThemes.Resolve(_barTheme);
+            var theme = CurrentTheme();
             for (var i = 0; i < _progressBars.Length; i++)
             {
                 var progress = _progressBars[i];
@@ -1183,7 +1993,7 @@ public partial class FormAudioSpectrum : Form
         if (random == null)
             throw new ArgumentNullException(nameof(random));
 
-        var styles = VisualStyles.GetSupportedNames(mode);
+        var styles = VisualStyles.GetEffectNames(mode);
         var currentIndex = Array.IndexOf(styles, GetAppliedVisualStyle(mode, currentStyle));
         return styles[GetDifferentRandomIndex(currentIndex, styles.Length, random)];
     }
@@ -1201,6 +2011,8 @@ public partial class FormAudioSpectrum : Form
             preferences.Mode = _visualMode;
             preferences.Style = GetAppliedVisualStyle(_visualMode, _visualStyle);
             preferences.Theme = _barTheme;
+            preferences.Guides = _showGuides.ToString(CultureInfo.InvariantCulture);
+            preferences.Appearance = _appearance;
             preferences.RotationMode = _randomRotationEnabled ? "Random" : "Fixed";
             preferences.RotationIntervalMinutes = _rotationIntervalMinutes;
             preferences.Save();
@@ -1235,7 +2047,7 @@ public partial class FormAudioSpectrum : Form
     private void InitializeBarsOptimized(string visualMode)
     {
         _progressBars = new VerticalProgressBar[BAR_COUNT];
-        var theme = BarColorThemes.Resolve(_barTheme);
+        var theme = CurrentTheme();
 
         ambiance_ThemeSpectrum.SuspendLayout();
         try
@@ -1260,6 +2072,7 @@ public partial class FormAudioSpectrum : Form
                 ApplyColorThemeOptimized(progress, theme);
                 progress.ApplyThemeChrome(theme.Ui);
                 progress.VisualStyle = VisualStyles.Parse(GetAppliedVisualStyle(_visualMode, _visualStyle));
+                progress.ShowGuides = _showGuides;
 
                 _progressBars[i] = progress;
                 ambiance_ThemeSpectrum.Controls.Add(progress);
@@ -1269,9 +2082,11 @@ public partial class FormAudioSpectrum : Form
             {
                 Mode = ResolveAdvancedMode(visualMode),
                 ThemeName = _barTheme,
+                ShowGuides = _showGuides,
                 Style = VisualStyles.Parse(GetAppliedVisualStyle(_visualMode, _visualStyle)),
                 Visible = IsAdvancedMode(visualMode)
             };
+            _advancedVisualizer.ApplyTheme(theme);
             ambiance_ThemeSpectrum.Controls.Add(_advancedVisualizer);
 
             _axisLabels = new Label[s_axisLandmarksHz.Length];
@@ -1326,10 +2141,10 @@ public partial class FormAudioSpectrum : Form
         RecalculateBarLayout();
     }
 
-    private void UpdateModeDescription()
+    internal string GetModeDescription(string mode) => mode switch
     {
-        var description = _visualMode switch
-        {
+            "Overview" => "Measured spectrum and front-channel levels in a shared overview; unavailable channels remain labeled.",
+            "Stereo Compare" => "Independent left and right band measurements overlaid on aligned scales, distinguished by solid and dashed traces.",
             "Oscilloscope" => "Actual front-left PCM waveform; auto-ranging is labeled, not a spectral curve.",
             "Stereo Levels" => "Independent front-channel RMS and sample peaks in amplitude-relative dBFS; not calibrated VU or LUFS.",
             "Stereo Spectrum" => "Independent front-left and front-right frequency-band measurements.",
@@ -1341,12 +2156,16 @@ public partial class FormAudioSpectrum : Form
             "Advanced Spectral Balance" => "Seven FFT-measured bands, 20 Hz–20 kHz, in dBFS relative to a full-scale sine; not simulated from the 83 display bands.",
             "Spectral Balance" => "Estimated relative bass, mid and high power from measured display bands.",
             "Level Change" => "Signed frame-to-frame displayed-level change; not a beat or transient detector.",
-            "Threshold Monitor" => "Measured frequency bands compared with the visible -24 dBFS reference.",
+            "Threshold Monitor" => $"Measured frequency bands compared with the visible {_advancedVisualizer?.ThresholdDb ?? -24} dBFS reference. Adjust the rule through View > Monitoring threshold.",
             "Peak Trace" => "Current frequency spectrum with a genuine held-peak envelope.",
-            "Band Matrix" => "All measured bands shown as compact labeled frequency and level cards.",
+            "Band Matrix" => "Inspect measured bands. Click or use arrow keys to select and pin a sampled readout; click again to refresh. Freeze holds the full display.",
             "Radial Spectrum" => "Measured logarithmic frequency bands arranged clockwise around a circle.",
             _ => "Measured 83-band frequency spectrum with full-scale-sine-relative dBFS and elapsed-time ballistics."
-        };
+    };
+
+    private void UpdateModeDescription()
+    {
+        var description = GetModeDescription(_visualMode);
         _modeSelector.AccessibleDescription = description + " Press Ctrl+M to cycle alphabetically.";
         _selectionToolTip.SetToolTip(_modeSelector, description);
     }
@@ -1465,6 +2284,8 @@ public partial class FormAudioSpectrum : Form
                     || _visualMode.Equals(AdvancedSpectralBalanceMode, StringComparison.OrdinalIgnoreCase)
                     || _visualMode.Equals("Spectral History", StringComparison.OrdinalIgnoreCase)
                     || _visualMode.Equals("Stereo Spectrum", StringComparison.OrdinalIgnoreCase)
+                    || _visualMode.Equals("Overview", StringComparison.OrdinalIgnoreCase)
+                    || _visualMode.Equals("Stereo Compare", StringComparison.OrdinalIgnoreCase)
                     || _visualMode.Equals("Dynamics History", StringComparison.OrdinalIgnoreCase))
                     HideFrequencyAxisLabels();
             }
@@ -1771,6 +2592,7 @@ public partial class FormAudioSpectrum : Form
             _audioBuffer.CopyFrom(e.Audio);
             _spectrumPlanBuffer = e.Plan;
 
+            if (_displayFrozen) return;
             postNeeded = !_updatePending;
             _updatePending = true;
         }
@@ -1801,6 +2623,7 @@ public partial class FormAudioSpectrum : Form
         lock (_updateLock)
         {
             _updatePending = false;
+            if (_displayFrozen) return;
             Buffer.BlockCopy(_spectrumBuffer, 0, _applyBuffer, 0, BAR_COUNT);
             _audioApplyBuffer.CopyFrom(_audioBuffer);
             _appliedPlan = _spectrumPlanBuffer;
@@ -1855,6 +2678,16 @@ public partial class FormAudioSpectrum : Form
         _rotationSettingsButton.FlatAppearance.MouseOverBackColor = ui.Hover;
         _rotationSettingsButton.FlatAppearance.MouseDownBackColor = ui.Selection;
         _captureStatusLabel.ForeColor = ui.SecondaryText;
+        UpdatePaletteHelp();
+        foreach (var button in new[] { _guidesButton, _freezeButton, _pinButton, _viewButton })
+        {
+            if (button == null) continue;
+            button.BackColor = ui.ControlSurface;
+            button.ForeColor = ui.PrimaryText;
+            button.FlatAppearance.BorderColor = ui.Divider;
+            button.FlatAppearance.MouseOverBackColor = ui.Hover;
+            button.FlatAppearance.MouseDownBackColor = ui.Selection;
+        }
 
         if (_axisLabels != null)
         {
@@ -1874,6 +2707,12 @@ public partial class FormAudioSpectrum : Form
 
         selector.BackColor = theme.ControlSurface;
         selector.ForeColor = theme.PrimaryText;
+        if (selector is ModernSelector modern)
+        {
+            modern.BorderColor = theme.Divider;
+            modern.FocusBorderColor = theme.Focus;
+        }
+        selector.Invalidate();
     }
 
     private static void ApplyAxisTheme(Label[] labels, VisualTheme theme)
@@ -1895,12 +2734,18 @@ public partial class FormAudioSpectrum : Form
         progress.PeakLineThickness = 2;
 
         progress.PeakDecayPerTick = 1.15f;
+        // Separate the rectangular brick rhythm from the smaller round LED cells.
+        // These existing geometry properties use the control's established pixel convention.
+        progress.BrickHeight = 6;
+        progress.BrickGap = 2;
 
         mode = (mode ?? string.Empty).Trim().ToLowerInvariant();
 
         switch (mode)
         {
             case "bricks":
+                progress.BrickHeight = 8;
+                progress.BrickGap = 3;
                 progress.UseAsymmetricBallistics = true;
                 progress.ResponseTimeMs = 110;
                 progress.ReleaseTimeMs = 320;
@@ -1924,6 +2769,8 @@ public partial class FormAudioSpectrum : Form
             case "iec2":
             case "bbc":
             case "ebu":
+                progress.BrickHeight = 5;
+                progress.BrickGap = 2;
                 progress.UseAsymmetricBallistics = true;
                 progress.ResponseTimeMs = 90;
                 progress.ReleaseTimeMs = 380;
@@ -1972,9 +2819,12 @@ public partial class FormAudioSpectrum : Form
         _isDisposed = true;
 
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _rotationTimer?.Stop();
         _rotationTimer?.Dispose();
         _rotationTimer = null;
+        _viewMenu?.Dispose();
+        _viewMenu = null;
         _selectionToolTip?.Dispose();
         _selectionToolTip = null;
         _captureStatusTimer?.Stop();
@@ -2072,7 +2922,7 @@ internal sealed class VisualSelectionRandomizer
                     continue;
 
                 var candidates = new List<VisualSelection>();
-                var styles = VisualStyles.GetSupportedNames(mode);
+                var styles = VisualStyles.GetEffectNames(mode);
                 foreach (var style in styles)
                 {
                     if (styles.Length > 1 && Same(style, VisualStyles.Resolve(current.Style)))

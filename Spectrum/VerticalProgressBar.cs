@@ -7,6 +7,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Threading;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace Spectrum;
@@ -108,6 +109,7 @@ public sealed class VerticalProgressBar : ProgressBar
     private readonly SolidBrush _glowOuterBrush = new(Color.FromArgb(24, Color.Cyan));
     private readonly SolidBrush _glowMiddleBrush = new(Color.FromArgb(66, Color.Cyan));
     private readonly SolidBrush _glowCoreBrush = new(Color.FromArgb(224, Color.Cyan));
+    private bool _lightCanvas;
     private SolidBrush _brickHighlightBrush;
     private readonly Pen _borderPen = new(Color.FromArgb(92, 167, 177, 188), 1f);
     private readonly Pen _innerEdgePen = new(Color.FromArgb(24, 255, 255, 255), 1f);
@@ -119,6 +121,7 @@ public sealed class VerticalProgressBar : ProgressBar
     private readonly Pen _gridlinePen = new(Color.FromArgb(26, 205, 218, 231), 1f);
 
     private readonly Pen _wavePen = new(Color.Lime, 2f);
+    private readonly Pen _effectPen = new(Color.Transparent, 1f);
     private Color _cachedWaveColor = Color.Empty;
     private float _cachedWaveWidth = -1f;
 
@@ -182,6 +185,47 @@ public sealed class VerticalProgressBar : ProgressBar
         => mode is not VisualizationMode.Center and not VisualizationMode.Mirror;
 
     private VisualStyle _style;
+    private bool _showGuides;
+    private bool _displayFrozen;
+    private float _effectStrength = 0.6f;
+    internal float EffectStrength
+    {
+        get => _effectStrength;
+        set
+        {
+            _effectStrength = Math.Max(0, Math.Min(1, float.IsNaN(value) ? 0.6f : value));
+            _colorsDirty = _meterSurfacesDirty = true;
+            _lastDisplayQ = int.MinValue;
+            Invalidate();
+        }
+    }
+    internal bool ShowGuides
+    {
+        get => _showGuides;
+        set { if (_showGuides == value) return; _showGuides = value; _meterSurfacesDirty = true; Invalidate(); }
+    }
+    internal bool DisplayFrozen
+    {
+        get => _displayFrozen;
+        set
+        {
+            if (_displayFrozen == value) return;
+            _displayFrozen = value;
+            lock (s_lock)
+            {
+                s_lastTicks = 0;
+                if (!value) EnsureTimerConfigured_NoLock();
+                else
+                {
+                    var anyLive = false;
+                    foreach (var reference in s_instances)
+                        if (reference.TryGetTarget(out var control) && !control.IsDisposed && control.Visible && !control.DisplayFrozen)
+                        { anyLive = true; break; }
+                    if (!anyLive) s_timer?.Stop();
+                }
+            }
+        }
+    }
 
     internal VisualStyle VisualStyle
     {
@@ -192,6 +236,7 @@ public sealed class VerticalProgressBar : ProgressBar
                 return;
 
             _style = value;
+            _colorsDirty = _meterSurfacesDirty = true;
             Array.Clear(_trailLife, 0, _trailLife.Length);
             _trailActive = false;
             _lastTrailQ = int.MinValue;
@@ -487,14 +532,15 @@ public sealed class VerticalProgressBar : ProgressBar
 
     internal void ApplyThemeChrome(VisualTheme theme)
     {
+        _lightCanvas = theme.VisualizationSurface.GetBrightness() > 0.5f;
         BackColor = theme.VisualizationSurface;
         ForeColor = theme.PrimaryText;
-        _inactiveBrickColor = Color.FromArgb(120, theme.InactiveSignal);
-        _inactiveDotColor = Color.FromArgb(155, theme.InactiveSignal);
-        _inactiveSpectrumColor = Color.FromArgb(96, theme.InactiveSignal);
+        _inactiveBrickColor = Color.FromArgb(38, theme.InactiveSignal);
+        _inactiveDotColor = Color.FromArgb(55, theme.InactiveSignal);
+        _inactiveSpectrumColor = Color.FromArgb(30, theme.InactiveSignal);
         _waveBackgroundColor = Color.FromArgb(72, theme.InactiveSignal);
-        _borderPen.Color = theme.Frame;
-        _innerEdgePen.Color = Color.FromArgb(80, theme.Divider);
+        _borderPen.Color = Color.FromArgb(28, theme.Frame);
+        _innerEdgePen.Color = Color.FromArgb(12, theme.Divider);
         _highlightPen.Color = Color.FromArgb(122, theme.PrimaryText);
         _gridlinePen.Color = Color.FromArgb(94, theme.Grid);
         _meterSurfacesDirty = true;
@@ -523,6 +569,7 @@ public sealed class VerticalProgressBar : ProgressBar
             _glowMiddleBrush?.Dispose();
             _glowCoreBrush?.Dispose();
             _wavePen?.Dispose();
+            _effectPen?.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -606,9 +653,67 @@ public sealed class VerticalProgressBar : ProgressBar
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        RemoveNativeEdges();
         Interlocked.Exchange(ref _timerWakePending, 0);
         EnsureTimerConfigured();
     }
+
+    protected override void WndProc(ref Message message)
+    {
+        base.WndProc(ref message);
+        // The native progress class can add its static edge again when visual styles change.
+        if (message.Msg == 0x031A && IsHandleCreated && !IsDisposed && !Disposing)
+            RemoveNativeEdges();
+    }
+
+    private bool _removingNativeEdges;
+    private void RemoveNativeEdges()
+    {
+        if (_removingNativeEdges) return;
+        _removingNativeEdges = true;
+        try
+        {
+            var handle = Handle;
+            var style = ReadNativeStyle(handle, -16);
+            var extended = ReadNativeStyle(handle, -20);
+            var flatStyle = style & ~0x00800000; // WS_BORDER
+            var flatExtended = extended & ~(0x00000100 | 0x00000200 | 0x00020000);
+            if (style == flatStyle && extended == flatExtended) return;
+            if (style != flatStyle) WriteNativeStyle(handle, -16, flatStyle);
+            if (extended != flatExtended) WriteNativeStyle(handle, -20, flatExtended);
+            // Recalculate the native client area after removing a class-injected nonclient edge.
+            if (!SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x0037))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to refresh the meter client frame.");
+        }
+        finally { _removingNativeEdges = false; }
+    }
+
+    private static int ReadNativeStyle(IntPtr handle, int index)
+    {
+        ClearNativeLastError(0);
+        var value = GetNativeWindowLong(handle, index);
+        var error = Marshal.GetLastWin32Error();
+        if (value == 0 && error != 0) throw new Win32Exception(error, "Unable to read meter window styles.");
+        return value;
+    }
+
+    private static void WriteNativeStyle(IntPtr handle, int index, int value)
+    {
+        ClearNativeLastError(0);
+        var previous = SetNativeWindowLong(handle, index, value);
+        var error = Marshal.GetLastWin32Error();
+        if (previous == 0 && error != 0) throw new Win32Exception(error, "Unable to update meter window styles.");
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "SetLastError", SetLastError = true)]
+    private static extern void ClearNativeLastError(uint error);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
+    private static extern int GetNativeWindowLong(IntPtr handle, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
+    private static extern int SetNativeWindowLong(IntPtr handle, int index, int value);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr handle, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
     protected override void OnVisibleChanged(EventArgs e)
     {
@@ -670,7 +775,7 @@ public sealed class VerticalProgressBar : ProgressBar
             UpdateLitBricks(bounds, bottomInner, innerH, filledH);
 
         var activeTop = GetActiveTop(mode, plot, filledH);
-        var cached = (mode == VisualizationMode.Spectrum || mode == VisualizationMode.Bricks ||
+        var cached = VisualStyle != VisualStyle.Outline && (mode == VisualizationMode.Spectrum || mode == VisualizationMode.Bricks ||
             mode == VisualizationMode.Led) && DrawCachedMeter(e.Graphics, bounds, mode);
         GraphicsState levelClip;
         if (!cached)
@@ -678,7 +783,17 @@ public sealed class VerticalProgressBar : ProgressBar
             DrawMeterBackground(e.Graphics, bounds);
             levelClip = e.Graphics.Save();
             e.Graphics.SetClip(plot, CombineMode.Intersect);
-            switch (mode)
+            if (VisualStyle == VisualStyle.Outline)
+            {
+                if (filledH > 0 && innerW > 0)
+                {
+                    _effectPen.Color = GetLevelColor(fillPercent);
+                    _effectPen.Width = 1.5f;
+                    e.Graphics.DrawRectangle(_effectPen, innerX, bottomInner - filledH,
+                        Math.Max(0.5f, innerW - 1), Math.Max(0.5f, filledH - 1));
+                }
+            }
+            else switch (mode)
             {
             case VisualizationMode.Bricks:
                 DrawMode_Bricks(e.Graphics, bounds);
@@ -719,7 +834,7 @@ public sealed class VerticalProgressBar : ProgressBar
             DrawStyleTrail(e.Graphics, innerX, innerW, topInner, bottomInner, innerH, range);
         else if (VisualStyle == VisualStyle.Scanline)
             DrawStyleScanline(e.Graphics, innerX, innerW, topInner, innerH, fillPercent);
-        else if (VisualStyle == VisualStyle.Precision)
+        if (ShowGuides || VisualStyle == VisualStyle.Precision)
             DrawPrecisionGrid(e.Graphics, innerX, innerW, topInner, bottomInner, innerH);
 
         var topEdge = mode == VisualizationMode.Center || mode == VisualizationMode.Mirror
@@ -952,6 +1067,8 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private int GetActiveTop(VisualizationMode mode, Rectangle plot, int filledH)
     {
+        if (VisualStyle == VisualStyle.Outline)
+            return filledH <= 0 ? plot.Bottom : Math.Max(plot.Top, plot.Bottom - filledH - (HighQualityRendering ? 1 : 0));
         if (mode is VisualizationMode.Bricks or VisualizationMode.Led or VisualizationMode.Dots)
         {
             if (_litBricks <= 0 || _brickRects.Count == 0) return plot.Bottom;
@@ -1185,9 +1302,10 @@ public sealed class VerticalProgressBar : ProgressBar
 
         // emphasis stays on the active edge so Glow doesn't turn into a second filled bar
         var color = GetLevelColor(fillPercent);
-        _glowOuterBrush.Color = Color.FromArgb(36, color);
-        _glowMiddleBrush.Color = Color.FromArgb(76, color);
-        _glowCoreBrush.Color = Color.FromArgb(180, color);
+        // A halo needs less opacity on a light surface to keep the level edge crisp.
+        _glowOuterBrush.Color = Color.FromArgb((int)((_lightCanvas ? 34 : 60) * EffectStrength), color);
+        _glowMiddleBrush.Color = Color.FromArgb((int)((_lightCanvas ? 82 : 120) * EffectStrength), color);
+        _glowCoreBrush.Color = Color.FromArgb((int)(220 * EffectStrength), color);
 
         g.FillRectangle(_glowOuterBrush, innerX, fillTop, innerW, Math.Min(3, fillHeight));
         if (fillHeight > 1)
@@ -1266,7 +1384,7 @@ public sealed class VerticalProgressBar : ProgressBar
             var percent = Clamp01((_trailLevels[i] - Minimum) / range);
             var y = bottomInner - (int)Math.Round(percent * innerH);
             if (y < topInner || y >= bottomInner) continue;
-            _workBrush.Color = Color.FromArgb((int)(100 * _trailLife[i] / 0.4f), GetLevelColor(percent));
+            _workBrush.Color = Color.FromArgb((int)(160 * EffectStrength * _trailLife[i] / 0.4f), GetLevelColor(percent));
             g.FillRectangle(_workBrush, innerX, y, innerW, 1);
         }
     }
@@ -1274,8 +1392,9 @@ public sealed class VerticalProgressBar : ProgressBar
     private void DrawStyleScanline(Graphics g, int innerX, int innerW, int topInner, int innerH, float fillPercent)
     {
         var y = topInner + (int)Math.Round((1f - fillPercent) * Math.Max(0, innerH - 1));
-        using var pen = new Pen(Color.FromArgb(80, HeatHighColor), 1f);
-        g.DrawLine(pen, innerX, y, innerX + innerW - 1, y);
+        _effectPen.Color = Color.FromArgb((int)(80 * EffectStrength), HeatHighColor);
+        _effectPen.Width = 1;
+        g.DrawLine(_effectPen, innerX, y, innerX + innerW - 1, y);
     }
 
     private void DrawPrecisionGrid(Graphics g, int innerX, int innerW, int topInner, int bottomInner, int innerH)
@@ -1284,12 +1403,13 @@ public sealed class VerticalProgressBar : ProgressBar
         if (levels == null)
             return;
 
-        using var pen = new Pen(Color.FromArgb(160, _gridlinePen.Color), 1f);
+        _effectPen.Color = Color.FromArgb(120, _gridlinePen.Color);
+        _effectPen.Width = 1;
         foreach (var level in levels)
         {
             var y = bottomInner - (int)Math.Round(Clamp01(level) * innerH);
             if (y >= topInner && y <= bottomInner)
-                g.DrawLine(pen, innerX, y, innerX + innerW, y);
+                g.DrawLine(_effectPen, innerX, y, innerX + innerW, y);
         }
     }
 
@@ -1428,23 +1548,10 @@ public sealed class VerticalProgressBar : ProgressBar
         if (!HeatmapEnabled || _brickRects.Count == 0)
             return;
 
-        var curve = Math.Max(0.15f, HeatIntensityCurve);
-
         for (var i = 0; i < _brickRects.Count; i++)
         {
-            var t = _brickT[i];
-
-            t = (float)Math.Pow(t, 1.0f / curve);
-            var c = HeatmapColorHsv(t, HeatLowColor, HeatMidColor, HeatHighColor, HeatPeakColor);
-
-            if (TopEmphasisEnabled && t >= TopEmphasisStart)
-            {
-                var u = (t - TopEmphasisStart) / Math.Max(0.0001f, 1f - TopEmphasisStart);
-                var strength = TopEmphasisStrength * (0.25f + (0.75f * u));
-                c = LerpRgb(c, HeatPeakColor, strength);
-            }
-
-            _brickHeatColors[i] = c;
+            // Use exactly the same style color as the uncached spectrum path.
+            _brickHeatColors[i] = GetLevelColor(_brickT[i]);
         }
     }
 
@@ -1483,7 +1590,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
         if (VisualStyle == VisualStyle.Pulse)
         {
-            c = LerpRgb(c, Color.White, 0.08f + (0.20f * Clamp01(level01)));
+            c = LerpRgb(c, Color.White, EffectStrength * (0.06f + (0.16f * Clamp01(level01))));
         }
 
         return c;
@@ -1657,6 +1764,7 @@ public sealed class VerticalProgressBar : ProgressBar
         else
             _visualPeakValid = _visualPeakReleasing = false;
 
+        if (VisualStyle == VisualStyle.Outline) return filledH;
         switch (mode)
         {
             case VisualizationMode.Lollipop:
@@ -1719,7 +1827,7 @@ public sealed class VerticalProgressBar : ProgressBar
 
     private void EnsureTimerConfigured_NoLock()
     {
-        if (!Visible || IsDisposed || Disposing) return;
+        if (DisplayFrozen || !Visible || IsDisposed || Disposing) return;
         if (s_timer == null)
         {
             s_timer = new System.Windows.Forms.Timer();
@@ -1763,7 +1871,7 @@ public sealed class VerticalProgressBar : ProgressBar
                     s_instances.RemoveAt(i);
                     continue;
                 }
-                if (!ctrl.Visible) continue;
+                if (!ctrl.Visible || ctrl.DisplayFrozen) continue;
 
                 ctrl.AnimateStep(dt, intervalMs);
                 anyAnimating |= !ctrl.IsSettled();
@@ -1808,7 +1916,15 @@ public sealed class VerticalProgressBar : ProgressBar
         get
         {
             var cp = base.CreateParams;
-            cp.Style |= 0x04;
+            // We paint the complete meter frame. Native progress-bar nonclient
+            // edges otherwise draw bright full-height rails around every band,
+            // even though the user-painted inactive surface is quiet.
+            const int border = 0x00800000;
+            const int windowEdge = 0x00000100;
+            const int clientEdge = 0x00000200;
+            const int staticEdge = 0x00020000;
+            cp.Style = (cp.Style & ~border) | 0x04; // PBS_VERTICAL
+            cp.ExStyle &= ~(windowEdge | clientEdge | staticEdge);
             return cp;
         }
     }

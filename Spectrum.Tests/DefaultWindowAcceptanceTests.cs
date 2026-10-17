@@ -43,7 +43,7 @@ public class DefaultWindowAcceptanceTests
                 var client = form.ClientSize;
                 var minimum = form.MinimumSize;
                 var selector = Field<ComboBox>(form, "_modeSelector");
-                Assert.Equal(19, selector.Items.Count);
+                Assert.Equal(21, selector.Items.Count);
                 foreach (var mode in selector.Items.Cast<string>().ToArray())
                 {
                     selector.SelectedItem = mode;
@@ -62,7 +62,7 @@ public class DefaultWindowAcceptanceTests
                     AssertStable(form, bounds, client, minimum, "keyboard " + expected);
                 }
                 var random = new Random(51023);
-                for (var selection = 0; selection < 19; selection++)
+                for (var selection = 0; selection < selector.Items.Count; selection++)
                 {
                     form.RandomizeVisualSelection(random);
                     Reflow(form);

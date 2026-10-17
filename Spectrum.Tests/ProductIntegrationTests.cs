@@ -25,7 +25,7 @@ public class ProductIntegrationTests
             "Band Matrix", "Bricks", "Contour", "Dynamics History", "LED", "Level Change",
             "Octave Spectrum", "Octave Waterfall", "Oscilloscope", "Peak Trace", "Radial Spectrum",
             "Advanced Spectral Balance", "Spectral Balance", "Spectral History", "Spectrum", "Stereo Levels", "Stereo Spectrum",
-            "Threshold Monitor", "Waterfall"
+            "Threshold Monitor", "Waterfall", "Overview", "Stereo Compare"
         };
         var first = FormAudioSpectrum.VisualModeNames;
         Assert.Equal(FormAudioSpectrum.SortModeNames(expected), first);
@@ -47,6 +47,8 @@ public class ProductIntegrationTests
         };
         for (var identifier = 0; identifier < stableNames.Length; identifier++)
             Assert.Equal(stableNames[identifier], Enum.GetName(typeof(AdvancedVisualizationMode), identifier));
+        Assert.Equal(20, (int)AdvancedVisualizationMode.Overview);
+        Assert.Equal(21, (int)AdvancedVisualizationMode.StereoCompare);
     }
 
     [Theory]
@@ -170,7 +172,9 @@ public class ProductIntegrationTests
             Assert.Equal("Spectral History", selector.SelectedItem);
             Assert.True(panel.Parent.ClientRectangle.Contains(panel.Bounds), $"Selectors exceed the {width}x{height} client area.");
             var visibleControls = new List<Control> { selector,
-                CombinedRandomizationTests.GetField<Button>(form, "_rotationSettingsButton") };
+                CombinedRandomizationTests.GetField<Button>(form, "_viewButton") };
+            if (!CombinedRandomizationTests.GetField<bool>(form, "_compactToolbar"))
+                visibleControls.Add(CombinedRandomizationTests.GetField<Button>(form, "_rotationSettingsButton"));
             if (width >= 700)
             {
                 visibleControls.Add(CombinedRandomizationTests.GetField<ComboBox>(form, "_styleSelector"));
@@ -202,8 +206,8 @@ public class ProductIntegrationTests
             var modeSelector = CombinedRandomizationTests.GetField<ComboBox>(form, "_modeSelector");
             using var bitmap = new Bitmap(selector.Width, selector.Height);
             using var graphics = Graphics.FromImage(bitmap);
-            Assert.Equal(VisualStyles.Names, selector.Items.Cast<string>().ToArray());
-            foreach (var style in VisualStyles.Names)
+            Assert.Equal(VisualStyles.GetEffectNames("Spectrum"), selector.Items.Cast<string>().ToArray());
+            foreach (var style in VisualStyles.GetEffectNames("Spectrum"))
             {
                 selector.SelectedItem = style;
                 Assert.Equal(style, selector.SelectedItem);

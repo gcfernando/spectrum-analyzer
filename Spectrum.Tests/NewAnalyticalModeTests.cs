@@ -45,9 +45,10 @@ public class NewAnalyticalModeTests
             {
                 var next = randomizer.Next(current, modes, BarColorThemes.Names, random);
                 Assert.NotEqual(current.Mode, next.Mode);
-                Assert.NotEqual(current.Style, next.Style);
+                if (VisualStyles.GetEffectNames(next.Mode).Any(style => style != current.Style))
+                    Assert.NotEqual(current.Style, next.Style);
                 Assert.NotEqual(current.Theme, next.Theme);
-                Assert.Contains(next.Style, VisualStyles.GetSupportedNames(next.Mode));
+                Assert.Contains(next.Style, VisualStyles.GetEffectNames(next.Mode));
                 visited.Add(next.Mode); current = next;
             }
             Assert.Contains("Stereo Spectrum", visited);

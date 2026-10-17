@@ -506,7 +506,13 @@ public class Ambiance_ControlBox : Control
         set
         {
             field = value;
-            _maximizeButton?.Visible = value;
+            if (_maximizeButton != null)
+            {
+                _maximizeButton.Visible = value;
+                _minimizeButton.Left = 0;
+                _maximizeButton.Left = 22;
+                _closeButton.Left = value ? 44 : 22;
+            }
             Size = field ? new Size(64, 22) : new Size(44, 22);
             Invalidate();
         }
@@ -520,9 +526,9 @@ public class Ambiance_ControlBox : Control
         TabStop = false;
         AccessibleName = "Window controls";
         Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        _closeButton = CreateWindowButton("closeButton", "Close", 0, 2);
-        _minimizeButton = CreateWindowButton("minimizeButton", "Minimize", 22, 0);
-        _maximizeButton = CreateWindowButton("maximizeButton", "Maximize or restore", 44, 1);
+        _closeButton = CreateWindowButton("closeButton", "Close", 44, 2);
+        _minimizeButton = CreateWindowButton("minimizeButton", "Minimize", 0, 0);
+        _maximizeButton = CreateWindowButton("maximizeButton", "Maximize or restore", 22, 1);
         _closeButton.Click += (sender, args) => FindForm()?.Close();
         _minimizeButton.Click += (sender, args) =>
         {

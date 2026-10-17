@@ -44,7 +44,7 @@ public class VisualStyleTests
     public void LedDisallowsGlowAndExposesOnlyItsSupportedStyles()
     {
         Assert.Equal("None", FormAudioSpectrum.GetAppliedVisualStyle("LED", "Glow"));
-        Assert.Equal(new[] { "None", "Pulse", "Scanline", "Precision" }, VisualStyles.GetSupportedNames("LED"));
+        Assert.Equal(new[] { "None", "Pulse", "Scanline", "Precision", "Outline" }, VisualStyles.GetSupportedNames("LED"));
     }
 
     [Theory]
@@ -71,7 +71,7 @@ public class VisualStyleTests
     [Fact]
     public void StyleSelectorChoicesIncludeSafeDefaultAndOnlyStyles()
     {
-        Assert.Equal(new[] { "None", "Pulse", "Glow", "Trail", "Scanline", "Precision" }, VisualStyles.Names);
+        Assert.Equal(new[] { "None", "Pulse", "Glow", "Trail", "Scanline", "Precision", "Outline" }, VisualStyles.Names);
         Assert.DoesNotContain("Pulse", GetVisualModes());
         Assert.DoesNotContain("Glow", GetVisualModes());
     }

@@ -153,13 +153,16 @@ public class SevenBandSpectralBalanceTests
         var samples = Signals.StereoSine(analyzer.RequiredFrames, fs, 440, 0.5, 0.5);
         var power = new double[7];
         analyzer.Analyze(samples, analyzer.RequiredFrames, power);
-        var before = GC.GetTotalMemory(true);
-        var watch = Stopwatch.StartNew();
+        var watch = new Stopwatch();
+        // Scope allocation evidence to the analysis thread. Process-wide retained heap
+        // includes unrelated test-host work and can grow while this allocation-free loop runs.
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        watch.Start();
         const int iterations = 200;
         for (var i = 0; i < iterations; i++) analyzer.Analyze(samples, analyzer.RequiredFrames, power);
         watch.Stop();
-        var allocated = GC.GetTotalMemory(false) - before;
-        _out.WriteLine($"7-band analysis: {watch.Elapsed.TotalMilliseconds / iterations:0.000} ms/call, {allocated} bytes retained growth");
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        _out.WriteLine($"7-band analysis: {watch.Elapsed.TotalMilliseconds / iterations:0.000} ms/call, {allocated} bytes allocated on analysis thread");
         Assert.True(watch.Elapsed.TotalMilliseconds / iterations < 10);
         Assert.True(allocated < 64 * 1024);
     }
@@ -260,7 +263,7 @@ public class SevenBandSpectralBalanceTests
             using var bitmap = new Bitmap(width, height);
             control.DrawToBitmap(bitmap, new Rectangle(0, 0, width, height));
             for (var b = 0; b < 7; b++) Assert.InRange(control.GetSevenBandDisplayDb(b), levels[b] - 0.5, levels[b] + 0.5);
-            if (width >= 160) Assert.True(Enumerable.Range(0, bitmap.Width).Any(x => bitmap.GetPixel(x, bitmap.Height / 2) != bitmap.GetPixel(0, bitmap.Height / 2)));
+            if (width >= 160) Assert.Contains(Enumerable.Range(0, bitmap.Width), x => bitmap.GetPixel(x, bitmap.Height / 2) != bitmap.GetPixel(0, bitmap.Height / 2));
         });
     }
 

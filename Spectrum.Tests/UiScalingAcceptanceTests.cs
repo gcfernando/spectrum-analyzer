@@ -146,7 +146,7 @@ public class UiScalingAcceptanceTests
                 CombinedRandomizationTests.GetField<ComboBox>(form, "_styleSelector"),
                 CombinedRandomizationTests.GetField<ComboBox>(form, "_themeSelector")
             };
-            var names = new[] { "Visualization mode", "Optional visual style", "Bar color theme" };
+            var names = new[] { "Visualization mode", "Optional visual effect", "Signal palette" };
             for (var i = 0; i < selectors.Length; i++)
             {
                 Assert.Equal(names[i], selectors[i].AccessibilityObject.Name);
@@ -157,8 +157,9 @@ public class UiScalingAcceptanceTests
                 if (i < 2) Assert.True(selectors[i + 1].Focused);
             }
             var rotation = CombinedRandomizationTests.GetField<Button>(form, "_rotationSettingsButton");
-            Assert.True(rotation.Focused);
-            Assert.Equal(AccessibleRole.PushButton, rotation.AccessibilityObject.Role);
+            var nextAction = rotation.Visible ? rotation : CombinedRandomizationTests.GetField<Button>(form, "_viewButton");
+            Assert.True(nextAction.Focused);
+            Assert.Equal(AccessibleRole.PushButton, nextAction.AccessibilityObject.Role);
             var status = CombinedRandomizationTests.GetField<Label>(form, "_captureStatusLabel");
             Assert.Equal("Audio capture source and status", status.AccessibilityObject.Name);
             Assert.Equal(AccessibleRole.StaticText, status.AccessibilityObject.Role);
@@ -185,7 +186,7 @@ public class UiScalingAcceptanceTests
             form.ClientSize = new Size(1920, 1080);
             ShowWithoutCapture(form);
             var fields = new[] { "_modeSelector", "_styleSelector", "_themeSelector" };
-            var keys = new[] { 'm', 's', 't' };
+            var keys = new[] { 'm', 'e', 'p' };
             for (var i = 0; i < fields.Length; i++)
             {
                 var label = CombinedRandomizationTests.GetField<Label>(form, fields[i] + "Label");

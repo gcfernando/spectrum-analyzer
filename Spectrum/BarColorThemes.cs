@@ -1,5 +1,6 @@
 // Developer :: > Gehan Fernando
 using System.Drawing;
+using Microsoft.Win32;
 
 namespace Spectrum;
 
@@ -28,6 +29,60 @@ internal readonly struct BarColorTheme
 // Catalog of built-in themes plus name lookup
 internal static class BarColorThemes
 {
+    // These colors identify a measurement's role, not its decorative palette.
+    internal static Color MonitoringBelow(VisualTheme ui) => EnsureContrast(Color.FromArgb(42, 155, 184), ui.VisualizationSurface);
+    internal static Color MonitoringAbove(VisualTheme ui) => EnsureContrast(Color.FromArgb(218, 125, 44), ui.VisualizationSurface);
+    internal static Color ChannelLeft(VisualTheme ui) => MonitoringBelow(ui);
+    internal static Color ChannelRight(VisualTheme ui) => MonitoringAbove(ui);
+    internal static Color BalanceGroup(int group, VisualTheme ui) => EnsureContrast(group == 0
+        ? Color.FromArgb(42, 155, 184) : group == 1 ? Color.FromArgb(145, 115, 205)
+        : Color.FromArgb(218, 125, 44), ui.VisualizationSurface);
+    // Appearance changes chrome independently of the saved signal palette.
+    internal static BarColorTheme ApplyAppearance(BarColorTheme palette, string appearance)
+    {
+        if (string.Equals(appearance, "System", System.StringComparison.OrdinalIgnoreCase))
+        {
+            if (System.Windows.Forms.SystemInformation.HighContrast) appearance = "High Contrast";
+            else
+            {
+                try
+                {
+                    using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+                    appearance = key?.GetValue("AppsUseLightTheme") is int value && value == 0 ? "Dark" : "Light";
+                }
+                catch (System.Security.SecurityException) { appearance = "Dark"; }
+                catch (System.UnauthorizedAccessException) { appearance = "Dark"; }
+            }
+        }
+        var ui = string.Equals(appearance, "Light", System.StringComparison.OrdinalIgnoreCase) ? PlatinumLight.Ui
+            : string.Equals(appearance, "Dark", System.StringComparison.OrdinalIgnoreCase) ? s_neutralUi
+            : string.Equals(appearance, "High Contrast", System.StringComparison.OrdinalIgnoreCase) ? HighContrast.Ui
+            : palette.Ui;
+        if (ui.Equals(palette.Ui)) return palette;
+        return new BarColorTheme(EnsureContrast(palette.Low, ui.VisualizationSurface),
+            EnsureContrast(palette.Mid, ui.VisualizationSurface), EnsureContrast(palette.High, ui.VisualizationSurface),
+            EnsureContrast(palette.Peak, ui.VisualizationSurface), palette.IntensityCurve, ui);
+    }
+
+    internal static Color EnsureContrast(Color color, Color background)
+    {
+        double Luminance(Color c)
+        {
+            double Linear(byte v) { var x = v / 255d; return x <= 0.04045 ? x / 12.92 : System.Math.Pow((x + 0.055) / 1.055, 2.4); }
+            return 0.2126 * Linear(c.R) + 0.7152 * Linear(c.G) + 0.0722 * Linear(c.B);
+        }
+        var bg = Luminance(background);
+        var target = bg > 0.4 ? Color.Black : Color.White;
+        var adjusted = color;
+        for (var step = 0; step < 20; step++)
+        {
+            var level = Luminance(adjusted);
+            if ((System.Math.Max(bg, level) + 0.05) / (System.Math.Min(bg, level) + 0.05) >= 4.5) break;
+            adjusted = Color.FromArgb((adjusted.R * 9 + target.R) / 10,
+                (adjusted.G * 9 + target.G) / 10, (adjusted.B * 9 + target.B) / 10);
+        }
+        return adjusted;
+    }
     // Display names for the theme picker; keep in sync with Resolve() below
     internal static readonly string[] Names =
     {
@@ -198,9 +253,9 @@ internal static class BarColorThemes
 
     // Pure black with saturated bars and white frames for accessibility
     public static readonly BarColorTheme HighContrast = new(
-        low: Color.FromArgb(255, 221, 64),
-        mid: Color.FromArgb(64, 235, 255),
-        high: Color.FromArgb(255, 141, 225),
+        low: Color.FromArgb(176, 129, 20),
+        mid: Color.FromArgb(225, 179, 40),
+        high: Color.FromArgb(255, 226, 130),
         peak: Color.White,
         intensityCurve: 1.35f,
         ui: new VisualTheme(
