@@ -119,6 +119,7 @@ public partial class FormAudioSpectrum : Form
     private System.Windows.Forms.Timer _captureStatusTimer;
     private Exception _preferencesLoadError;
     private FlowLayoutPanel _selectionPanel;
+    private Control[] _selectionControls;
     private Label _modeSelectorLabel;
     private Label _styleSelectorLabel;
     private Label _themeSelectorLabel;
@@ -410,6 +411,8 @@ public partial class FormAudioSpectrum : Form
         _freezeButton = CreateUtilityButton("freezeButton", "Freeze", "Freeze the display while audio capture continues (Ctrl+Space)", () => SetDisplayFrozen(!_displayFrozen));
         _pinButton = CreateUtilityButton("pinButton", "Pin", "Keep Spectrum above other windows (F12)", TogglePin);
         _viewButton = CreateUtilityButton("viewButton", "View\u2026", "Browse modes, presets, appearance, display controls and save an image", ShowViewMenu);
+        _selectionControls = new Control[] { _modeSelectorLabel, _modeSelector, _styleSelectorLabel, _styleSelector,
+            _themeSelectorLabel, _themeSelector, _rotationSettingsButton, _guidesButton, _freezeButton, _pinButton, _viewButton };
         _modeSelector.SelectedIndexChanged += ModeSelector_SelectedIndexChanged;
         _styleSelector.SelectedIndexChanged += StyleSelector_SelectedIndexChanged;
         _themeSelector.SelectedIndexChanged += ThemeSelector_SelectedIndexChanged;
@@ -1431,6 +1434,16 @@ public partial class FormAudioSpectrum : Form
         _selectionPanel.SuspendLayout();
         try
         {
+            // ComboBoxInfo needs native handles. Creating only selectors while their
+            // labels are hidden lets WinForms later import a different native z-order
+            // into Controls, which FlowLayoutPanel uses as its visual order. Establish
+            // the whole semantic row first, including hidden labels and overflow buttons.
+            // Use the stable array because native handle creation can mutate Controls.
+            foreach (var control in _selectionControls)
+                _ = control.Handle;
+            for (var index = 0; index < _selectionControls.Length; index++)
+                if (_selectionPanel.Controls.GetChildIndex(_selectionControls[index]) != index)
+                    _selectionPanel.Controls.SetChildIndex(_selectionControls[index], index);
             var width = ambiance_ThemeSpectrum.ClientSize.Width;
             ambiance_ControlBox.Location = new Point(Math.Max(0, width - ambiance_ControlBox.Width - 8), 8);
             // old-style chrome stays a fixed size even when WinForms scales the children
@@ -1472,7 +1485,16 @@ public partial class FormAudioSpectrum : Form
             foreach (var utility in new[] { _guidesButton, _freezeButton, _pinButton, _viewButton })
             {
                 if (utility == null) continue;
-                utility.Width = TextRenderer.MeasureText(utility.Text, utility.Font).Width + (int)Math.Ceiling(18 * scale);
+                // State changes must not change the row-fit decision or move the plot.
+                // Measure every state with the current font, including enlarged accessibility text.
+                var stateLabels = utility == _guidesButton ? new[] { "Guides: On", "Guides: Off" }
+                    : utility == _freezeButton ? new[] { "Freeze", "Resume" }
+                    : utility == _pinButton ? new[] { "Pin", "Pinned" }
+                    : new[] { utility.Text };
+                var textWidth = 0;
+                foreach (var stateLabel in stateLabels)
+                    textWidth = Math.Max(textWidth, TextRenderer.MeasureText(stateLabel, utility.Font).Width);
+                utility.Width = textWidth + (int)Math.Ceiling(18 * scale);
                 utility.Height = rowHeight;
                 controlsWidth += utility.Width + utility.Margin.Horizontal;
             }
@@ -1506,7 +1528,12 @@ public partial class FormAudioSpectrum : Form
                     ? "View and display controls: rotation, guides, freeze, pin, presets and appearance. All keyboard shortcuts remain available."
                     : "Browse modes, presets, appearance, display controls and save an image");
             var titleWidth = TextRenderer.MeasureText("Audio Spectrum Analyzer", ambiance_ThemeSpectrum.Font).Width;
-            var inline = rowHeight <= 29 && controlsWidth + ambiance_ControlBox.Width + titleWidth + 40 <= width;
+            var compactTitleWidth = TextRenderer.MeasureText("Spectrum", ambiance_ThemeSpectrum.Font).Width;
+            // Existing chrome gap (24), title-to-toolbar gap (12), and title origin (16)
+            // determine the actual title rectangle. A short product name keeps the default
+            // toolbar inline while reserving stable widths for every utility state.
+            var titleSpace = width - ambiance_ControlBox.Width - controlsWidth - 24 - 12 - 16;
+            var inline = rowHeight <= 29 && titleSpace >= compactTitleWidth;
             var labels = new[] { _modeSelectorLabel, _styleSelectorLabel, _themeSelectorLabel };
             var labelsWidth = 0;
             foreach (var label in labels)
@@ -1515,7 +1542,7 @@ public partial class FormAudioSpectrum : Form
                 label.Height = rowHeight;
                 labelsWidth += label.Width + label.Margin.Horizontal;
             }
-            var showLabels = inline && controlsWidth + labelsWidth + ambiance_ControlBox.Width + titleWidth + 40 <= width;
+            var showLabels = inline && titleSpace - labelsWidth >= titleWidth;
             foreach (var label in labels) label.Visible = showLabels;
             _selectionPanel.WrapContents = !inline;
             _selectionPanel.Width = inline
@@ -1529,7 +1556,8 @@ public partial class FormAudioSpectrum : Form
                 _selectionPanel.GetPreferredSize(new Size(_selectionPanel.Width, int.MaxValue)).Height);
             ambiance_ThemeSpectrum.TitleRightInset = inline ? Math.Max(16, _selectionPanel.Left - 12)
                 : Math.Max(16, width - ambiance_ControlBox.Width - 24);
-            ambiance_ThemeSpectrum.Text = "Audio Spectrum Analyzer";
+            ambiance_ThemeSpectrum.Text = inline && ambiance_ThemeSpectrum.TitleRightInset - 16 < titleWidth
+                ? "Spectrum" : "Audio Spectrum Analyzer";
             if (_captureStatusLabel != null)
             {
                 var statusHeight = Math.Max(22, TextRenderer.MeasureText("Ag", _captureStatusLabel.Font).Height + 6);

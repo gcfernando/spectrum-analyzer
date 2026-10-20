@@ -94,6 +94,7 @@ public sealed class AdvancedVisualizationControl : Control
     private readonly int[] _sevenLabelTenths = new int[SevenBandAnalyzer.BandCount];
     private long _sevenLastTick;
     private readonly System.Windows.Forms.Timer _sevenTimer;
+    private Form _sevenHost;
     private bool _sevenHasData;
     private readonly int[] _balanceLabelTenths = new int[3];
     private readonly AudioVisualizationData _audio = new();
@@ -279,8 +280,8 @@ public sealed class AdvancedVisualizationControl : Control
             if (_displayFrozen == value) return;
             _displayFrozen = value;
             _lastFrameTick = _sevenLastTick = 0;
-            if (value) _sevenTimer.Stop();
-            else { _resumeSpectrum = true; _sevenTimer.Start(); }
+            if (!value) _resumeSpectrum = true;
+            UpdateSevenBandTimer();
         }
     }
     private float _paintFontHeight;
@@ -312,11 +313,14 @@ public sealed class AdvancedVisualizationControl : Control
         _sevenTimer = new System.Windows.Forms.Timer { Interval = 16 };
         _sevenTimer.Tick += (s, e) =>
         {
-            if (DisplayFrozen || !Visible || Mode != AdvancedVisualizationMode.AdvancedSpectralBalance || !_sevenHasData) return;
+            if (DisplayFrozen || !Visible || Mode != AdvancedVisualizationMode.AdvancedSpectralBalance || !_sevenHasData)
+            {
+                UpdateSevenBandTimer();
+                return;
+            }
             UpdateSevenBandBallistics();
             Invalidate();
         };
-        _sevenTimer.Start();
 
         _theme = BarColorThemes.Resolve(_themeName);
         ApplyThemeChrome(_theme);
@@ -343,6 +347,7 @@ public sealed class AdvancedVisualizationControl : Control
             if (IsMeasurementMode(value) && _style != VisualStyle.Precision)
                 _style = VisualStyle.None;
             UpdateHistoryCaption();
+            UpdateSevenBandTimer();
             Invalidate();
         }
     }
@@ -466,6 +471,7 @@ public sealed class AdvancedVisualizationControl : Control
         _mode = NormalizeMode(mode);
         if (IsMeasurementMode(_mode) && _style != VisualStyle.Precision) _style = VisualStyle.None;
         UpdateHistoryCaption();
+        UpdateSevenBandTimer();
         Invalidate();
     }
 
@@ -486,7 +492,50 @@ public sealed class AdvancedVisualizationControl : Control
         _mode = NormalizeMode(parsedMode);
         if (IsMeasurementMode(_mode) && _style != VisualStyle.Precision) _style = VisualStyle.None;
         UpdateHistoryCaption();
+        UpdateSevenBandTimer();
         Invalidate();
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        UpdateSevenBandTimer();
+    }
+
+    protected override void OnParentChanged(EventArgs e)
+    {
+        base.OnParentChanged(e);
+        SetSevenBandHost(IsDisposed || Disposing ? null : FindForm());
+        UpdateSevenBandTimer();
+    }
+
+    private void SetSevenBandHost(Form host)
+    {
+        if (ReferenceEquals(_sevenHost, host)) return;
+        if (_sevenHost != null)
+        {
+            _sevenHost.VisibleChanged -= OnSevenBandHostChanged;
+            _sevenHost.Resize -= OnSevenBandHostChanged;
+        }
+        _sevenHost = host;
+        if (_sevenHost != null)
+        {
+            _sevenHost.VisibleChanged += OnSevenBandHostChanged;
+            _sevenHost.Resize += OnSevenBandHostChanged;
+        }
+    }
+
+    private void OnSevenBandHostChanged(object sender, EventArgs e) => UpdateSevenBandTimer();
+
+    private void UpdateSevenBandTimer()
+    {
+        if (_sevenTimer == null || IsDisposed || Disposing) return;
+        // A host's visibility/minimize transition need not produce a child visibility
+        // event after its final state is applied. Observe the actual top-level state too.
+        var host = FindForm();
+        _sevenTimer.Enabled = !DisplayFrozen && Visible &&
+            (host == null || host.Visible && host.WindowState != FormWindowState.Minimized) &&
+            Mode == AdvancedVisualizationMode.AdvancedSpectralBalance && _sevenHasData;
     }
 
     protected override void OnBackColorChanged(EventArgs e)
@@ -658,6 +707,7 @@ public sealed class AdvancedVisualizationControl : Control
     {
         if (disposing)
         {
+            SetSevenBandHost(null);
             _sevenTimer?.Stop();
             _sevenTimer?.Dispose();
             for (var i = 0; i < _levelBrushes.Length; i++)
@@ -1510,6 +1560,7 @@ public sealed class AdvancedVisualizationControl : Control
     {
         if (DisplayFrozen) return;
         _audio.Update(samples, frames, channels, sampleRate);
+        UpdateSevenBandBallistics();
         UpdateAudioLabels();
         UpdateAnalysisLabels();
         Invalidate();
@@ -2120,6 +2171,9 @@ public sealed class AdvancedVisualizationControl : Control
 
     private static readonly string[] s_sevenShortNames = { "Sub", "Bass", "Low-Mid", "Mid", "Presence", "Treble", "Air" };
     private static readonly string[] s_sevenShortRanges = { "20–60", "60–250", "250–500", "0.5–2k", "2–6k", "6–10k", "10–20k" };
+    private readonly string[] _sevenRanges = new string[SevenBandAnalyzer.BandCount];
+    private readonly string[] _sevenCompactRanges = new string[SevenBandAnalyzer.BandCount];
+    private int _sevenRangeSampleRate = -1;
     private const float SevenBandRangeDb = 72f;
     private const int SevenBandAttackMs = 30;
     private const int SevenBandReleaseMs = 250;
@@ -2143,12 +2197,47 @@ public sealed class AdvancedVisualizationControl : Control
     internal double GetSevenBandPeakDb(int band) => _sevenPeaks[band] - SevenBandRangeDb;
 
     internal string GetSevenBandLabel(int band) => _sevenLabels[band];
+    internal RectangleF SevenBandPlotBounds { get; private set; }
+    internal bool SevenBandRangesVisible { get; private set; }
+
+    internal string GetSevenBandRangeLabel(int band, bool compact)
+    {
+        var sampleRate = _audio.SampleRate;
+        if (_sevenRangeSampleRate != sampleRate)
+        {
+            var nyquist = sampleRate / 2d;
+            for (var index = 0; index < SevenBandAnalyzer.BandCount; index++)
+            {
+                var definition = SevenBandAnalyzer.Definitions[index];
+                if (sampleRate <= 0 || definition.UpperHz <= nyquist)
+                {
+                    _sevenRanges[index] = definition.RangeLabel;
+                    _sevenCompactRanges[index] = s_sevenShortRanges[index];
+                }
+                else if (definition.LowerHz >= nyquist)
+                    _sevenRanges[index] = _sevenCompactRanges[index] = "n/a";
+                else
+                {
+                    string Number(double value) => value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+                    var lower = definition.LowerHz;
+                    _sevenRanges[index] = nyquist >= 1000
+                        ? (lower >= 1000 ? Number(lower / 1000) : Number(lower) + " Hz") + "–" + Number(nyquist / 1000) + " kHz"
+                        : Number(lower) + "–" + Number(nyquist) + " Hz";
+                    _sevenCompactRanges[index] = nyquist >= 1000
+                        ? Number(lower / 1000) + "–" + Number(nyquist / 1000) + "k"
+                        : Number(lower) + "–" + Number(nyquist);
+                }
+            }
+            _sevenRangeSampleRate = sampleRate;
+        }
+        return compact ? _sevenCompactRanges[band] : _sevenRanges[band];
+    }
 
     private void UpdateSevenBandBallistics()
     {
         if (DisplayFrozen) return;
         var now = Stopwatch.GetTimestamp();
-        var dtMs = _sevenLastTick == 0 ? 0f : Math.Min(250f, (now - _sevenLastTick) * 1000f / Stopwatch.Frequency);
+        var dtMs = _sevenLastTick == 0 ? 0f : (float)Math.Max(0d, (now - _sevenLastTick) * 1000d / Stopwatch.Frequency);
         _sevenLastTick = now;
         _sevenHasData = _audio.HasSevenBand;
         for (var band = 0; band < SevenBandAnalyzer.BandCount; band++)
@@ -2170,6 +2259,7 @@ public sealed class AdvancedVisualizationControl : Control
                 : tenths == int.MinValue ? "< −72"
                 : (tenths / 10d).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture).Replace('-', '−');
         }
+        UpdateSevenBandTimer();
     }
 
     private Color SevenBandColor(int band)
@@ -2186,19 +2276,30 @@ public sealed class AdvancedVisualizationControl : Control
         var valueHeight = (float)Math.Ceiling(_analysisTitleFont.GetHeight(graphics));
         var slotEstimate = width / (float)count;
         var tier = slotEstimate >= 96 ? 2 : slotEstimate >= 52 ? 1 : 0;
+        var axisWidth = width >= 210 ? (float)Math.Ceiling(lineHeight * 2.6f) : 0f;
+        var left = 3 + axisWidth;
+        var right = width - 4f;
+        var slotWidth = (right - left) / count;
         var showValue = height >= 70;
         var showRange = height >= 90 && slotEstimate >= 36;
+        if (showRange)
+            for (var band = 0; band < count; band++)
+                if (graphics.MeasureString(GetSevenBandRangeLabel(band, tier != 2), _analysisBodyFont).Width > slotWidth)
+                {
+                    // Exact low-rate boundaries can be longer than the nominal labels.
+                    // Hide the optional row as a whole rather than ellipsizing a frequency.
+                    showRange = false;
+                    break;
+                }
         var showName = height >= 110 && tier >= 1;
         var rows = (showValue ? 1 : 0) + (showRange ? 1 : 0) + (showName ? 1 : 0);
         var labelBlock = (showValue ? valueHeight : 0) + ((showRange ? 1 : 0) + (showName ? 1 : 0)) * lineHeight + (rows > 0 ? 4 : 0);
         var top = GetCaptionHeight(width, height);
         top = top > 0 ? top + 4 : 3;
-        var axisWidth = width >= 210 ? (float)Math.Ceiling(lineHeight * 2.6f) : 0f;
-        var left = 3 + axisWidth;
-        var right = width - 4f;
         var bottom = height - labelBlock - 3f;
         var plotHeight = bottom - top;
-        var slotWidth = (right - left) / count;
+        SevenBandPlotBounds = new RectangleF(left, top, Math.Max(0, right - left), Math.Max(0, plotHeight));
+        SevenBandRangesVisible = showRange && plotHeight >= 8 && slotWidth >= 4;
 
         var captionState = !_audio.HasSamples ? 0 : !_audio.HasSevenBand ? 1 : 2;
         var captionKey = captionState == 2 ? _audio.SampleRate * 4 + 2 : captionState;
@@ -2263,7 +2364,7 @@ public sealed class AdvancedVisualizationControl : Control
                 if (showRange)
                 {
                     cell.Y = rowTop;
-                    graphics.DrawString(tier == 2 ? SevenBandAnalyzer.Definitions[band].RangeLabel : s_sevenShortRanges[band],
+                    graphics.DrawString(GetSevenBandRangeLabel(band, tier != 2),
                         _analysisBodyFont, _textBrush, cell, _centeredText);
                 }
             }

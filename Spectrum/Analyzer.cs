@@ -152,7 +152,7 @@ public sealed class Analyzer : IDisposable
         try
         {
             _mmEnumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
-            _deviceNotificationClient = new DeviceNotificationClient(OnAudioDeviceChanged);
+            _deviceNotificationClient = new DeviceNotificationClient(OnAudioDeviceChanged, () => CurrentStatus);
             _ = _mmEnumerator.RegisterEndpointNotificationCallback(_deviceNotificationClient);
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Endpoint notifications unavailable: " + ex.Message); }
@@ -457,7 +457,7 @@ public sealed class Analyzer : IDisposable
         }
     }
 
-    // Zeroes the bars but still refreshes the observed window so peak/meter info stays truthful
+    // Validate the native silence hint against captured PCM before publishing measured zero.
     private void PublishSilence(AnalysisState state, bool validCaptureLevel, CaptureStream stream)
     {
         Array.Clear(_spectrumData, 0, LINES);
@@ -466,9 +466,19 @@ public sealed class Analyzer : IDisposable
         {
             _audioData.UpdateObservedWindow(state.Snapshot, frames, state.History.Channels, state.SampleRate,
                 endFrame, state.AudioEndFrame, _gate.GapEndFrame, stream);
+            // The native level is only a gate hint. The FFT window can still contain a
+            // decaying tone, or PCM below the native meter's resolution; measure that data.
+            if (WindowContainsSignal(state.Snapshot, frames, state.History.Channels))
+                PopulateAnalyzedSpectrum(state, frames);
+            else
+            {
+                Array.Clear(_leftBandPower, 0, LINES);
+                Array.Clear(_rightBandPower, 0, LINES);
+                _audioData.SetChannelSpectrum(_leftBandPower, _rightBandPower);
+                if (Volatile.Read(ref _sevenBandEnabled) != 0)
+                    _audioData.SetSevenBandPower(null);
+            }
             state.AudioEndFrame = endFrame;
-            _audioData.SetChannelSpectrum(null, null);
-            _audioData.SetSevenBandPower(null);
         }
         else
             _audioData.SetUnavailableWindow(state.History.TotalFrames, state.History.Channels, state.SampleRate, stream);
@@ -489,9 +499,32 @@ public sealed class Analyzer : IDisposable
             return;
         }
 
-        state.Engine.Analyze(state.Snapshot, frames, _bandPower, _leftBandPower, _rightBandPower);
         _audioData.UpdateObservedWindow(state.Snapshot, frames, state.History.Channels, state.SampleRate,
             endFrame, state.AudioEndFrame, _gate.GapEndFrame, stream);
+        PopulateAnalyzedSpectrum(state, frames);
+        state.AudioEndFrame = endFrame;
+        _fireEventArgs.Plan = state.Engine.Plan;
+        SetStatus(_audioData.HasSamples ? CaptureState.Capturing : CaptureState.Unavailable,
+            _audioData.HasSamples ? "Capturing system output" : "Waiting for captured PCM");
+        FireOnChange();
+    }
+
+    private static bool WindowContainsSignal(float[] samples, int frames, int channels)
+    {
+        var analyzedChannels = Math.Min(channels, 2);
+        for (var frame = 0; frame < frames; frame++)
+            for (var channel = 0; channel < analyzedChannels; channel++)
+            {
+                var sample = samples[frame * channels + channel];
+                if (sample != 0 && !float.IsNaN(sample) && !float.IsInfinity(sample)) return true;
+            }
+        return false;
+    }
+
+    // Both paths use the same copied PCM exactly once; observations are recorded by the caller.
+    private void PopulateAnalyzedSpectrum(AnalysisState state, int frames)
+    {
+        state.Engine.Analyze(state.Snapshot, frames, _bandPower, _leftBandPower, _rightBandPower);
         _audioData.SetChannelSpectrum(_leftBandPower, _rightBandPower);
         // Seven-band work is skipped unless someone turned it on
         if (state.SevenBand != null && Volatile.Read(ref _sevenBandEnabled) != 0)
@@ -499,17 +532,10 @@ public sealed class Analyzer : IDisposable
             state.SevenBand.Analyze(state.Snapshot, frames, _sevenBandPower);
             _audioData.SetSevenBandPower(_sevenBandPower);
         }
-        state.AudioEndFrame = endFrame;
-        _fireEventArgs.Plan = state.Engine.Plan;
-        SetStatus(_audioData.HasSamples ? CaptureState.Capturing : CaptureState.Unavailable,
-            _audioData.HasSamples ? "Capturing system output" : "Waiting for captured PCM");
-
         for (var i = 0; i < LINES; i++)
         {
             _spectrumData[i] = LevelScale.ToDisplayByte(LevelScale.PowerToDb(_bandPower[i]));
         }
-
-        FireOnChange();
     }
 
     // Copy into a separate buffer first so subscribers never see half-written data, and one bad handler can't break the rest
@@ -841,9 +867,13 @@ public sealed class Analyzer : IDisposable
     private sealed class DeviceNotificationClient : NAudio.CoreAudioApi.Interfaces.IMMNotificationClient
     {
         private readonly Action _onDefaultChanged;
+        private readonly Func<CaptureStatus> _currentStatus;
 
-        public DeviceNotificationClient(Action onDefaultChanged)
-            => _onDefaultChanged = onDefaultChanged;
+        public DeviceNotificationClient(Action onDefaultChanged, Func<CaptureStatus> currentStatus)
+        {
+            _onDefaultChanged = onDefaultChanged;
+            _currentStatus = currentStatus;
+        }
 
         public void OnDefaultDeviceChanged(
             NAudio.CoreAudioApi.DataFlow flow,
@@ -858,9 +888,21 @@ public sealed class Analyzer : IDisposable
             }
         }
 
-        public void OnDeviceAdded(string pwstrDeviceId) => _onDefaultChanged();
-        public void OnDeviceRemoved(string deviceId) => _onDefaultChanged();
-        public void OnDeviceStateChanged(string deviceId, NAudio.CoreAudioApi.DeviceState newState) => _onDefaultChanged();
+        private void OnEndpointChanged(string deviceId)
+        {
+            // Callbacks run on COM threads. Read one immutable status snapshot and leave
+            // enumeration/native teardown to the existing coalesced recovery worker.
+            var status = _currentStatus();
+            if (status == null || status.SampleRate <= 0 || status.Channels <= 0 ||
+                string.IsNullOrEmpty(status.DeviceId) || status.State == CaptureState.Unavailable ||
+                status.State == CaptureState.Starting || status.State == CaptureState.Recovering ||
+                string.Equals(deviceId, status.DeviceId, StringComparison.OrdinalIgnoreCase))
+                _onDefaultChanged();
+        }
+
+        public void OnDeviceAdded(string pwstrDeviceId) => OnEndpointChanged(pwstrDeviceId);
+        public void OnDeviceRemoved(string deviceId) => OnEndpointChanged(deviceId);
+        public void OnDeviceStateChanged(string deviceId, NAudio.CoreAudioApi.DeviceState newState) => OnEndpointChanged(deviceId);
         public void OnPropertyValueChanged(string pwstrDeviceId, NAudio.CoreAudioApi.PropertyKey key) { }
     }
 }
@@ -989,11 +1031,17 @@ internal sealed class AudioVisualizationData
     internal readonly double[] SevenBandPower = new double[SevenBandAnalyzer.BandCount];
     internal bool HasSevenBand { get; private set; }
 
-    // Stores the 7-band result, or clears it when null
+    // Null denotes measured digital silence, preserving unsupported bands at this sample rate.
     internal void SetSevenBandPower(double[] power)
     {
         HasSevenBand = HasSamples;
-        if (power == null) { Array.Clear(SevenBandPower, 0, SevenBandPower.Length); return; }
+        if (power == null)
+        {
+            for (var band = 0; band < SevenBandPower.Length; band++)
+                SevenBandPower[band] = HasSamples && SevenBandAnalyzer.Definitions[band].LowerHz >= SampleRate / 2d
+                    ? double.NaN : 0;
+            return;
+        }
         if (power.Length < SevenBandPower.Length) throw new ArgumentException("Expected seven bands.", nameof(power));
         Array.Copy(power, SevenBandPower, SevenBandPower.Length);
     }

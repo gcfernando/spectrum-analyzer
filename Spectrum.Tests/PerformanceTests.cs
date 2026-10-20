@@ -57,7 +57,7 @@ public class PerformanceTests
         var allocated = GC.GetAllocatedBytesForCurrentThread() - allocBefore;
         var msPerFrame = sw.Elapsed.TotalMilliseconds / frames;
 
-        _out.WriteLine($"stereo 83-band frame (windows 4096+8192+16384, longest zero-padded to 32768): {msPerFrame:F3} ms/frame = {msPerFrame / 31.7 * 100:F1} % of one core at the measured 31.7 ms hop");
+        _out.WriteLine($"stereo 83-band frame (windows 4096+8192+16384, longest zero-padded to 32768): {msPerFrame:F3} ms/frame; {msPerFrame / 25 * 100:F1}% of the requested 25 ms analysis delay (excludes callback/UI work and scheduling)");
         _out.WriteLine($"allocated {allocated} bytes over {frames} frames on the analysis thread; gen0 collections {GC.CollectionCount(0) - gen0}");
 
         // Some slack for host noise, still way under one array allocation per frame.

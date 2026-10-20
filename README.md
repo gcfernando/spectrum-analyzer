@@ -79,6 +79,7 @@ Spectrum is a C# Windows Forms application for real-time audio visualization and
 - **Fixed or Random rotation** — choose Fixed to keep selections stable, or Random to change mode, compatible effect, and palette together at a configurable 1–240 minute interval (default 5 minutes); preferences are saved per user
 - **Rotation settings shortcut** — press `Ctrl+R` to open Fixed/Random and interval settings
 - **F12 toggle** — toggle always-on-top
+- **Stable utility controls** — Pin/Pinned, Freeze/Resume and Guides reserve the same space in both states; the title shortens to Spectrum when needed to keep the default toolbar on its top row
 - **View menu** — browse modes by purpose, search with purpose descriptions, preview presets, choose appearance, adjust effect intensity, band-change range or monitoring threshold, show octave values, choose Waterfall resolution, save an image, and inspect capture details
 - **Display Freeze** — hold the visible frame and visual ballistics while capture continues; resuming uses the latest captured data and starts a fresh display-history/delta baseline
 - **Goal-based presets** — Overview, Analyze, Compare Peaks, Stereo, Band Change, Retro Bricks, Ambient Radial, History, and Clean Outline
@@ -504,6 +505,10 @@ only the front pair is measured.
 
 **Meter conventions.** The frequency spectrum uses a full-scale-sine power reference. PCM RMS and sample-peak meters instead use amplitude-relative digital full scale: a full-scale sine has approximately −3.0103 dBFS RMS and 0 dBFS sample peak. None of these displays claims calibrated LUFS, SPL, VU, standardized PPM, or oversampled true-peak measurement. Mono sources do not invent a second channel.
 
+**Seven-band ranges.** Advanced Spectral Balance trims partially supported bands at the captured Nyquist limit and marks unreachable bands unavailable. For example, 32 kHz capture measures the final band over 10–16 kHz; 22.05 kHz capture measures 10–11.025 kHz. Exact range labels are omitted together when a compact canvas cannot fit them legibly. This view has an 800 ms held-peak interval followed by 24 dB/s decay, separate from the radial display's 300 ms hold. Its animation uses elapsed time and sleeps outside an active, visible, unfrozen seven-band view with supplied measurements.
+
+**Captured silence.** A native zero-level hint is checked against actual PCM. Nonzero samples and FFT-window tails still undergo spectral analysis. Real captured zeros retain available zero channel spectra; missing current PCM remains unavailable. The PCM meters cover newly observed samples, while an FFT spans a longer window, so a silent current packet may coexist with a preceding tone's spectral tail.
+
 **Timing (default Spectrum mode).** Attack: full-scale rise in 45 ms. Release: exponential, time constant
 380 ms. Peak marker: 300 ms hold, then a linear fall, independent of the bar. Peaks track measured
 targets as well as displayed levels, so a brief measured peak is retained before a slow bar attack
@@ -544,9 +549,11 @@ bars trail treble bars by roughly 0.1 s. This is the time/frequency trade-off of
 
 > Implementation details for device-change recovery, stream-hang detection, and silence publication.
 
-- Device changes (plug/unplug, default device switch) are detected via `IMMNotificationClient` and trigger an automatic re-initialisation on the UI thread
+- Default render/Multimedia changes and selected-endpoint notifications are detected via `IMMNotificationClient` and request serialized recovery on a worker thread. Unrelated endpoint notifications do not interrupt healthy capture; unavailable capture can retry discovery.
 - A hang detector monitors consecutive identical WASAPI levels and forces a device reset if the stream appears stuck
-- Silence (zero level, or no new captured frames) publishes the floor; bars then decay with their release time
+- Captured zero PCM publishes available zero spectra and bars decay with their release time. Nonzero PCM overrides a native zero-level hint; a lack of current captured frames is reported as unavailable.
+
+The [2026-10-20 engineering audit](AUDIT-2026-10-20.md) records the issue register, measurement definitions, before/after evidence, reproducible runtime probes and release gates. Its results apply to the tested artifact and environments.
 
 ---
 

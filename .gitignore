@@ -11,3 +11,5 @@
 /.vs/ProjectEvaluation
 /Spectrum/.vs
 /packages
+/artifacts/audit/
+/TestResults/
