@@ -1,5 +1,6 @@
 # Provision only a disposable GitHub-hosted machine, never a developer workstation.
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
     throw 'This script can only provision a disposable GitHub-hosted runner.'
 }
@@ -19,20 +20,24 @@ $packages = @(
     }
 )
 foreach ($package in $packages) {
+    Write-Output "Downloading $($package.Name) with pinned SHA-256 verification."
     $archive = Join-Path $tools ($package.Name + '.zip')
-    Invoke-WebRequest -Uri $package.Url -OutFile $archive -UseBasicParsing
+    Invoke-WebRequest -Uri $package.Url -OutFile $archive -UseBasicParsing -TimeoutSec 60
     if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $package.Hash) {
         throw "Checksum mismatch for $($package.Name)."
     }
     Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $tools $package.Name) -Force
+    Write-Output "Verified and extracted $($package.Name)."
 }
 
 $driverSource = Join-Path $tools 'driver\VirtualDisplayDriver'
 $installer = Join-Path $tools 'nefcon\x64\nefconc.exe'
 foreach ($file in @((Join-Path $driverSource 'mttvdd.cat'), $installer)) {
+    Write-Output "Validating Authenticode signature: $file"
     if ((Get-AuthenticodeSignature -LiteralPath $file).Status -ne 'Valid') {
         throw "The display dependency has an invalid signature: $file"
     }
+    Write-Output 'Signature is valid.'
 }
 # The driver's documented configuration location is separate from the application payload.
 $driverDirectory = 'C:\VirtualDisplayDriver'
@@ -46,6 +51,7 @@ $settings.vdd_settings.gpu.friendlyname = 'Microsoft Basic Render Driver'
 $settings.Save($settingsPath)
 
 $inf = Join-Path $driverDirectory 'MttVDD.inf'
+Write-Output 'Installing the signed virtual display driver on the disposable runner.'
 & $installer install $inf 'Root\MttVDD'
 if ($LASTEXITCODE -ne 0) { throw "Virtual display installation failed: $LASTEXITCODE" }
 

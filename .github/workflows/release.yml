@@ -33,7 +33,7 @@ jobs:
 
       - name: Configure desktop for native UI tests
         shell: powershell
-        timeout-minutes: 3
+        timeout-minutes: 6
         run: .\scripts\Configure-CiDesktop.ps1
 
       - name: Run x86 regression suite
