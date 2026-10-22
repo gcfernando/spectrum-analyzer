@@ -31,6 +31,19 @@ jobs:
       - name: Restore and build Release
         run: msbuild Spectrum.sln -restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:LangVersion=14.0 -verbosity:minimal -nologo
 
+      - name: Configure desktop for native UI tests
+        shell: powershell
+        run: |
+          # The default 1024x768 hosted desktop clamps the windows exercised by this suite.
+          Set-DisplayResolution -Width 2560 -Height 1440 -Force
+          Start-Sleep -Seconds 2
+          Add-Type -AssemblyName System.Windows.Forms
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen
+          Write-Output "Desktop bounds: $($screen.Bounds); working area: $($screen.WorkingArea)"
+          if ($screen.WorkingArea.Width -lt 1920 -or $screen.WorkingArea.Height -lt 1280) {
+            throw 'Native UI tests require a desktop that can contain the 1800x1200 workbench and Full HD windows.'
+          }
+
       - name: Run x86 regression suite
         run: dotnet vstest .\Spectrum.Tests\bin\Release\net48\Spectrum.Tests.dll /Platform:x86 '/Logger:console;verbosity=normal' '/Logger:trx;LogFileName=tests.trx' /ResultsDirectory:TestResults
 
