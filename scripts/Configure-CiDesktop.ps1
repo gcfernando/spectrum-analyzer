@@ -87,6 +87,7 @@ public struct CiDisplayDevice {
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string Key;
 }
 public static class CiDesktop {
+    public static int ActiveDisplayCount;
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool EnumDisplayDevices(string device, uint index, ref CiDisplayDevice display, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -98,12 +99,14 @@ public static class CiDesktop {
 
     public static bool Configure() {
         var devices = new List<CiDisplayDevice>();
+        ActiveDisplayCount = 0;
         CiDisplayDevice virtualDevice = new CiDisplayDevice();
         for (uint index = 0; ; index++) {
             var device = new CiDisplayDevice();
             device.Size = Marshal.SizeOf(typeof(CiDisplayDevice));
             if (!EnumDisplayDevices(null, index, ref device, 0)) break;
             devices.Add(device);
+            if ((device.State & 1) != 0) ActiveDisplayCount++;
             Console.WriteLine(device.Name + ": " + device.Description + ", flags=" + device.State);
             if (device.Description.IndexOf("Virtual Display", StringComparison.OrdinalIgnoreCase) >= 0)
                 virtualDevice = device;
@@ -140,6 +143,25 @@ for ($attempt = 0; $attempt -lt 10; $attempt++) {
     if ([CiDesktop]::Configure()) { $configured = $true; break }
 }
 if (!$configured) { throw 'The signed virtual display did not become available.' }
+
+# Windows selects 200% scaling for the virtual 4K monitor by default. Normalize
+# all active displays so the x86 Framework test host has a predictable desktop.
+# SetDPI is CI-only, pinned by hash, and never included in the application package.
+$dpiTool = Join-Path $tools 'SetDpi.exe'
+Invoke-WebRequest -Uri 'https://github.com/imniko/SetDPI/releases/download/v1.0/SetDpi.exe' -OutFile $dpiTool -UseBasicParsing -TimeoutSec 60
+if ((Get-FileHash -LiteralPath $dpiTool -Algorithm SHA256).Hash -ne
+    '31f9a42027c8f936c114e4c200f05b0677affa93ab035801c0c2ab02fbf7dba1') {
+    throw 'Checksum mismatch for the CI display scaling tool.'
+}
+for ($display = 1; $display -le [CiDesktop]::ActiveDisplayCount; $display++) {
+    & $dpiTool 100 $display
+    if ($LASTEXITCODE -ne 0) { throw "Cannot set display $display to 100% scaling." }
+    $scale = (& $dpiTool value $display | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $scale -ne '100') {
+        throw "Display $display did not accept 100% scaling: $scale"
+    }
+    Write-Output "Verified display $display scaling: 100%."
+}
 Start-Sleep -Seconds 2
 Add-Type -AssemblyName System.Windows.Forms
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen
