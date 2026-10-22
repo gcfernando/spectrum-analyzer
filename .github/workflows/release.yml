@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     name: Build, test, and verify installer
-    runs-on: windows-2022
+    runs-on: windows-2025-vs2026
     timeout-minutes: 30
     defaults:
       run:
@@ -24,9 +24,12 @@ jobs:
 
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
+        with:
+          vs-version: '[18.0,19.0)'
+          msbuild-architecture: x64
 
       - name: Restore and build Release
-        run: msbuild Spectrum.sln -restore -p:RestorePackagesConfig=true -p:Configuration=Release -verbosity:minimal -nologo
+        run: msbuild Spectrum.sln -restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:LangVersion=14.0 -verbosity:minimal -nologo
 
       - name: Run x86 regression suite
         run: dotnet vstest .\Spectrum.Tests\bin\Release\net48\Spectrum.Tests.dll /Platform:x86 '/Logger:console;verbosity=normal' '/Logger:trx;LogFileName=tests.trx' /ResultsDirectory:TestResults
