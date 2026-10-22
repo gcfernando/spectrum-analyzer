@@ -47,17 +47,18 @@ jobs:
           }
           public static class DisplayModes {
             [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-            public static extern bool EnumDisplaySettings(string device, int index, ref DisplayMode mode);
+            public static extern bool EnumDisplaySettings(IntPtr device, int index, ref DisplayMode mode);
           }
           '@
           $modes = @()
           for ($index = 0; ; $index++) {
             $mode = New-Object DisplayMode
             $mode.Size = 220
-            if (![DisplayModes]::EnumDisplaySettings($null, $index, [ref]$mode)) { break }
+            if (![DisplayModes]::EnumDisplaySettings([IntPtr]::Zero, $index, [ref]$mode)) { break }
             $modes += $mode
           }
-          $modes | Select-Object Width, Height, BitsPerPixel -Unique | Format-Table
+          Write-Output "Enumerated $($modes.Count) display modes."
+          $modes | Select-Object Width, Height, BitsPerPixel -Unique | Format-Table | Out-String | Write-Output
           $target = $modes | Where-Object { $_.Width -ge 1920 -and $_.Height -ge 1440 -and $_.BitsPerPixel -eq 32 } |
             Sort-Object { [long]$_.Width * $_.Height } | Select-Object -First 1
           if (!$target) { throw 'The runner video device has no display mode large enough for the native UI tests.' }
