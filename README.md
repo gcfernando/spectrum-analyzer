@@ -11,7 +11,11 @@
   </table>
 </div>
 
-Spectrum is a C# Windows Forms application for real-time audio visualization and FFT analysis. It captures the Windows default audio output through WASAPI loopback using BASS and BassWASAPI. Explore frequency spectra, stereo levels, PCM waveforms, and display histories, or use it as a reference implementation of a .NET Framework 4.8 band analyzer. Spectrum analyzes audio; playback and volume remain controlled by your source application or Windows.
+Spectrum is a real-time **audio spectrum analyzer and music visualizer for Windows**, built with C# and Windows Forms on .NET Framework 4.8. It captures the Windows default audio output through WASAPI loopback using BASS and BassWASAPI, displaying 83 logarithmic frequency bands, stereo levels, PCM waveforms, and visual histories.
+
+Use **Visualize** for 21 visualization modes and 13 colour palettes, or open **Analyze**, **Compare**, and **Sessions** to inspect measurements, compare reference spectra, analyze audio files, and save local sessions. Playback and volume remain controlled by your source application or Windows.
+
+**[Download the latest Windows installer](https://github.com/gcfernando/spectrum-analyzer/releases/latest/download/SpectrumSetup.exe)** · [All builds and release notes](https://github.com/gcfernando/spectrum-analyzer/releases) · [Build status](https://github.com/gcfernando/spectrum-analyzer/actions/workflows/release.yml)
 
 ---
 
@@ -26,12 +30,15 @@ Spectrum is a C# Windows Forms application for real-time audio visualization and
 
 ### 🧭 Navigation
 
-[Features](#features) · [Modes](#modes) · [Screenshots](#gallery) · [Effects](#styles) · [Palettes](#themes) · [Configuration](#configuration) · [Requirements](#requirements) · [Build](#build) · [Run](#running) · [Tests](#tests) · [Measurement](#measurement) · [FAQ](#faq)
+[Download](#download) · [Quick start](#quick-start) · [Features](#features) · [Workspaces](#workspaces) · [Requirements](#requirements) · [Build](#build) · [Run](#running) · [Modes](#modes) · [Screenshots](#gallery) · [Effects](#styles) · [Palettes](#themes) · [Configuration](#configuration) · [Tests](#tests) · [Architecture](#project-structure) · [Measurement](#measurement) · [FAQ](#faq)
 
 ### ⌨️ Keyboard Controls
 
 |            Shortcut            | Action                              |
 | :----------------------------: | ----------------------------------- |
+| <kbd>Ctrl</kbd> + <kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> / <kbd>4</kbd> | Open Visualize / Analyze / Compare / Sessions |
+| <kbd>Ctrl</kbd> + <kbd>K</kbd> | Browse and search visualization views |
+| <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>A</kbd> | Open the separate Analysis Workbench |
 | <kbd>Ctrl</kbd> + <kbd>M</kbd> | Cycle visualization modes           |
 | <kbd>Ctrl</kbd> + <kbd>T</kbd> | Cycle colour themes                 |
 | <kbd>Ctrl</kbd> + <kbd>R</kbd> | Open Fixed/Random rotation settings |
@@ -40,56 +47,111 @@ Spectrum is a C# Windows Forms application for real-time audio visualization and
 | <kbd>Ctrl</kbd> + <kbd>S</kbd> | Save a PNG image                     |
 |         <kbd>F12</kbd>         | Toggle always-on-top                |
 
+<a id="quick-start"></a>
+
 ### 🚀 Quick Start
+
+To install Spectrum, follow [Download and install](#download). To build it yourself:
 
 1. Check the [Windows and .NET Framework requirements](#requirements), then open [Spectrum.sln](Spectrum.sln) in Visual Studio 2022 with .NET desktop development tools.
 2. [Restore NuGet packages and build the Release configuration](#build).
-3. [Run Spectrum](#running) from `Spectrum\bin\Release\`.
+3. [Run Spectrum](#running) from `Spectrum\bin\Release\`, then play audio in your usual application.
+4. Choose a view in **Visualize**, or switch to **Analyze** for detailed inspection. Use **Choose source** to select an active output endpoint when needed.
 
 > [!TIP]
 > Spectrum automatically captures the Windows default audio output through WASAPI loopback, so normal use does not require selecting an input device.
 
 ---
 
+<a id="download"></a>
+
+## Download and install
+
+1. Download **[SpectrumSetup.exe](https://github.com/gcfernando/spectrum-analyzer/releases/latest/download/SpectrumSetup.exe)** from the latest published default-branch build.
+2. Run the installer. It installs Spectrum for your Windows user, includes the required application DLLs and third-party notices, and adds a Start menu shortcut. Administrator access is not required.
+3. Launch **Spectrum** from the Start menu and play audio in your usual application. To remove it, use Windows **Installed apps**.
+
+The installer checks for **.NET Framework 4.8 or later** and explains how to obtain it if missing. It is currently unsigned. A `SpectrumSetup.exe.sha256` file accompanies each installer in [Releases](https://github.com/gcfernando/spectrum-analyzer/releases).
+
+The [release pipeline](.github/workflows/release.yml) runs on every branch push and can also be started manually from GitHub Actions. It restores and builds Release on Windows, runs the x86 regression suite, compiles an installer, checks installation/reinstallation and payload hashes, and verifies uninstallation before publishing a release. Builds from other branches are marked as prereleases. The newest successful default-branch build updates the permanent download link after verification; failures leave the previous download available, and slower older builds cannot replace a newer published build. Live-audio and separate desktop integration helpers are outside this pipeline.
+
+The download link becomes available after this workflow is pushed and its first default-branch build publishes successfully. Public releases require a public repository and GitHub Actions permission to write repository contents; the publish jobs request that permission through the built-in `GITHUB_TOKEN`.
+
+<a id="requirements"></a>
+
+## 📋 Requirements
+
+> [!IMPORTANT]
+> The application targets **Windows** and **.NET Framework 4.8** and depends on the included native BASS libraries.
+
+- **To run:** Windows and [.NET Framework 4.8](https://dotnet.microsoft.com/download/dotnet-framework/net48). The installer includes the runtime DLLs; when using a manual build, keep the complete Release output folder, including the native x86 `bass.dll` and `basswasapi.dll` libraries.
+- **To build:** Visual Studio 2022 with the .NET desktop development workload and .NET Framework 4.8 Developer/Targeting Pack, or equivalent full-framework MSBuild tools. The native references are included in `Spectrum\Ref_Files\`; restore the solution's NuGet dependencies before building.
+
+---
+
+<a id="build"></a>
+
+## 🏗️ Build
+
+Open `Spectrum.sln` in Visual Studio, select Release, restore NuGet packages and build (`Ctrl+Shift+B`), or run from a Visual Studio Developer PowerShell with MSBuild available:
+
+```powershell
+msbuild .\Spectrum.sln -restore -p:RestorePackagesConfig=true -p:Configuration=Release
+```
+
+The output is placed in `Spectrum\bin\Release\`.
+
+The Release application folder contains **12 essential root files and no subfolders**: the executable, configuration, nine managed/native runtime DLLs, and one `THIRD_PARTY_NOTICES.md`. Release builds omit development XML documentation and combine all five bundled package notice payloads verbatim into that single notice. Unused WindowsMediaFormat and NuGet ConfigurationManager DLLs are no longer deployed; the application retains the framework's `System.Configuration`. Required runtime dependencies are not embedded or deleted. Debug/test outputs remain separate. See [dependency terms and provenance](THIRD_PARTY_NOTICES.md) before redistribution; build success does not certify a publisher's private licensing agreements.
+
+<a id="running"></a>
+
+## ▶️ Running
+
+From the repository root, launch the built application:
+
+```powershell
+.\Spectrum\bin\Release\Spectrum.exe
+```
+
+Keep the complete output folder together. Capture follows the Windows default audio output through WASAPI loopback; play audio in your usual application to see activity. Use **Choose source** in the main window or the Workbench source selector to analyze another active output endpoint. Loopback captures that endpoint's combined output, rather than an isolated application session.
+
+The default client area is **1200 × 480 logical pixels** at a 96-DPI baseline. The application configures **PerMonitorV2** and adjusts its initial dimensions for the current display DPI and available working area. You can resize the window manually; changing visualization modes preserves its size. The default selections are **Bricks**, **None**, and **ClassicSmooth** unless saved user preferences override them.
+
 <a id="features"></a>
 
 ## ✨ Features
 
-> [!NOTE]
-> Explore measured band levels, stereo signals, and display histories with runtime customization and automatic device recovery.
+- **Live system-audio capture** through WASAPI loopback, following the Windows default output with automatic device recovery and optional selection of an active output endpoint.
+- **83 logarithmic frequency bands** in a 20 Hz–20 kHz viewport, measured band power, labelled frequency/dBFS axes, independent peak markers, and elapsed-time attack/release ballistics.
+- **21 visualization modes**, including Overview, Stereo Compare, Oscilloscope, Waterfall, and Advanced Spectral Balance. See the [mode table](#modes) for the purpose and measurement limits of each view.
+- **Four connected workspaces** for visualization, detailed analysis, reference comparison, and saved sessions, with a separate Analysis Workbench window when more space is useful.
+- **Offline analysis and export** with file-section selection, reference A/B comparisons, CSV measurements, saved sessions, and named workspaces.
+- **13 colour palettes** and independent Palette, System, Dark, Light, and High Contrast appearance choices, plus compatible visual effects, reference guides, and Fixed/Random rotation.
+- **Display controls** for Freeze/Resume, always-on-top, and PNG export, with keyboard shortcuts, visible focus, and compact-window command access through the View menu.
+- **Resizable Windows desktop interface** with a 1200 × 480 logical-pixel default client area and PerMonitorV2 configured in the application settings. Mode changes preserve the window size.
 
-- **83-bar frequency spectrum** with a fixed logarithmic 20 Hz – 20 kHz viewport, labelled frequency axis and a 0 to -72 dBFS level axis on both sides
-- **Calibrated spectrum grid** at every 6 dB, with logarithmic frequency guides at 20, 30, 40, 60, 100, 200, 300, 400, 600, 1k, 2k, 3k, 4k, 6k, 10k and 20k Hz; crowded frequency labels are omitted without moving their guides
-- **Measured band levels** — each bar is the integrated power of its frequency band in dBFS (see _Measurement_)
-- **21 visualization modes**, including Overview and Stereo Compare, selectable at runtime with an initial value from `App.config`
-- **Optional effects** with a safe `None` default: Pulse, Soft Glow, Trail, and Outline are enabled only where their renderer is meaningful; reference guides are independently selectable
-- **13 colour palettes** plus an independent application appearance, including light, dark, system, and high contrast choices
-- **Live mode, effect, and palette selectors**; changes apply immediately without restarting
-- **Alphabetical mode discovery** uses case-insensitive current-culture names with a deterministic ordinal tie-break; existing mode identifiers and saved selections are preserved
-- **Original vector mode icons** distinguish spectrum, stereo, waveform, matrix, threshold, and history views without bitmap stretching
-- **Shared window icon** — the main visualizer, Analysis Workbench, rotation settings, preset browser and visualization search use the same embedded Spectrum icon, with existing 16–256 px sizes
-- **Unified workspaces** — Visualize, Analyze, Compare and Sessions share the main window, appearance and current analysis. Browse all 21 views with previews, favorites and recent views; save named analyses/references in the local session library. Analysis can also pop out into its own window. See the [workspace guide and verification cases](SPECTRUM_STUDIO.md).
-- **1200 x 480 logical-pixel default client window** with Windows PerMonitorV2 scaling, manually resizable without mode-driven size changes, individually accessible window controls, visible keyboard focus, and descriptive mode tooltips
-- **Heat-map colour gradient** with theme-readable peak markers using the theme's primary text colour
-- **Independent falling peak markers** with configurable hold/decay, thin horizontal lines and a reserved gap above Spectrum, Bricks and LED bars, including full-scale and segmented-cell boundaries; expiring trails release clearance smoothly instead of causing jumps
-- **Asymmetric ballistics** — fast attack, slower release per mode
-- **Frame-rate independent animation** — ballistics use elapsed time; the one-shot analysis timer requests a 25 ms delay and restarts after processing, so actual analysis cadence also depends on processing and scheduling. The display targets 60 FPS; achieved control-paint cadence depends on timer scheduling and workload
-- **Silence detection** — bars fade out gracefully when no audio is playing
-- **Auto device recovery** — restores capture automatically when the default audio device changes
-- **Scaling layout** — bars and labels are laid out from the window's client size (the process does not declare per-monitor DPI awareness, so Windows scales it on high-DPI monitors)
-- **Keyboard shortcuts** — `Ctrl+M` cycles visualization modes; `Ctrl+T` cycles colour themes
-- **Fixed or Random rotation** — choose Fixed to keep selections stable, or Random to change mode, compatible effect, and palette together at a configurable 1–240 minute interval (default 5 minutes); preferences are saved per user
-- **Rotation settings shortcut** — press `Ctrl+R` to open Fixed/Random and interval settings
-- **F12 toggle** — toggle always-on-top
-- **Stable utility controls** — Pin/Pinned, Freeze/Resume and Guides reserve the same space in both states; the title shortens to Spectrum when needed to keep the default toolbar on its top row
-- **View menu** — browse modes by purpose, search with purpose descriptions, preview presets, choose appearance, adjust effect intensity, band-change range or monitoring threshold, show octave values, choose Waterfall resolution, save an image, and inspect capture details
-- **Display Freeze** — hold the visible frame and visual ballistics while capture continues; resuming uses the latest captured data and starts a fresh display-history/delta baseline
-- **Goal-based presets** — Overview, Analyze, Compare Peaks, Stereo, Band Change, Retro Bricks, Ambient Radial, History, and Clean Outline
-- **Compact toolbar overflow** — small or vertically crowded windows retain the three native selectors and View; Rotation, Guides, Freeze, and Pin remain available through View → Display controls and their shortcuts
-- **Single-instance** — uses a named mutex to prevent multiple instances
-- **Analysis Workbench** — **View → Analysis Workbench** or **Ctrl+Shift+A** opens adjustable dB/frequency ranges, exact inspection, source/channel selection, response controls, reference A/B comparisons, a sample-timed spectrogram, drag-and-drop offline files, CSV/sessions, stereo phase/correlation/mid-side, loudness/estimated true peak, and named workspaces. Its compact header, grouped commands, quick ranges, collapsible settings, structured inspector and persistent meter strip keep the graph central. See the [Workbench guide](ANALYSIS_WORKBENCH.md) for all twelve features and measurement limits, and the [acceptance cases](ANALYSIS_WORKBENCH_TEST_CASES.md) for verification coverage.
+The display targets 60 FPS. Analysis uses a one-shot timer that requests a 25 ms delay after processing; actual analysis and paint cadence depend on scheduling and workload. See [Measurement](#measurement) for timing and calibration details.
 
-Spectrum is an **analyzer, not a player or audio processor**. Its selectors, visual styles, and rotation settings change the display, not the captured audio. It has no playback, pause, stop, mute, master-volume, equalizer, or audio-effect controls. Control playback and volume in the source application or Windows. Capture follows the default render endpoint unless a source is explicitly selected in Analysis Workbench; offline file analysis does not play audio.
+Spectrum analyzes audio. Its visual effects, selectors, and rotation settings change the display; playback and volume stay in the source application or Windows. Offline file analysis does not play audio.
+
+<a id="workspaces"></a>
+
+## Workspaces and Analysis Workbench
+
+| Workspace | Use it to |
+| --- | --- |
+| **Visualize** | Browse all 21 views, keep favorites and recent views, and inspect displayed frequency-band readings. |
+| **Analyze** | Adjust frequency/dB ranges, inspect exact values, select source/channel and response settings, and view a sample-timed spectrogram and measurement strip. |
+| **Compare** | Capture a reference spectrum and compare it with the current analysis on shared frequency and level references. |
+| **Sessions** | Save named analyses or references with notes in the local library, then reopen, import, or export them. |
+
+Use **Ctrl+1** through **Ctrl+4** to switch workspaces, **Ctrl+K** to browse views, and **Ctrl+Shift+A** or **View → Analysis Workbench** to open analysis in its own window. The workspaces share the current analysis and appearance.
+
+The Workbench includes drag-and-drop offline files, file-section analysis, CSV export, saved measurement sessions, stereo phase/correlation and mid-side measurements, mono/stereo loudness, and an oversampled true-peak estimate. These are digital measurements; consult [meter conventions](#measurement) before comparing different displays.
+
+The file chooser offers **WAV, MP3, FLAC, AIFF, WMA, and M4A**. Decoding depends on the bundled readers and available Windows Media Foundation decoders; FLAC and other formats may be unavailable on a given system. Each file must fit **both** the 10-minute duration limit and the **16,777,216 decoded float-sample limit (64 MiB)**. The sample limit can require a much shorter file at higher channel counts or sample rates.
+
+The session library defaults to `%LOCALAPPDATA%\Spectrum\Library`; favorites and recent views are stored in `%LOCALAPPDATA%\Spectrum\views.xml`. Saved sessions contain measurements and history, rather than an audio recording.
 
 ---
 
@@ -97,7 +159,7 @@ Spectrum is an **analyzer, not a player or audio processor**. Its selectors, vis
 
 ## 🎛️ Visualization Modes
 
-Choose a visualization mode from the **Mode** selector in the title bar to change it immediately. The
+Choose a visualization mode from the **View** selector in the toolbar to change it immediately. The
 table uses the names shown in the interface. Configuration retains `Level Change` for **Band Level Change**
 and `Spectral History` for **Perspective History** so existing saved selections remain compatible.
 
@@ -128,6 +190,156 @@ and `Spectral History` for **Perspective History** so existing saved selections 
 Overview combines existing measured views in one workspace. Stereo Compare places the independent channel spectra on a shared reference; unavailable channel data stays explicitly unavailable. Neither layout changes the audio analysis.
 
 Retired selections remain compatible through migration: Dots → LED, Wave → Contour, Lollipop/Center/Ambient Particles → Spectrum, Mirror → Bricks, Note Map → Contour, Orbit History/Frequency Ribbon → Peak Trace, and Level Change Map/Transient Map/Spectral Flux → Level Change. These are aliases, not additional selectable modes. Existing advanced-mode numeric identifiers remain stable; Overview and Stereo Compare append new identifiers.
+
+<a id="styles"></a>
+
+## 🪄 Visual Effects and Reference Guides
+
+The mode owns the geometry; the **Style** selector adds a compatible presentation effect. `None` is
+the safe default. Effects use the current display levels or captured display-frame history; Pulse is a
+level-driven brightness effect, not beat detection. Incompatible effects fall back to None when changing
+modes. Random rotation selects only effects exposed for the selected mode.
+
+**Reference Guides** are independent of the effect. They add drawing references without changing audio
+measurement accuracy. Legacy `Precision` settings migrate to enabled guides when the independent guide
+preference has not been set. Legacy `Scanline` settings still parse for compatibility, but Scanline is
+retired from the effect picker and recommended presets.
+
+| Style            | Effect                                              |
+| ---------------- | --------------------------------------------------- |
+| `None` (default) | No overlay                                          |
+| `Pulse`          | Brightens in proportion to the current signal level |
+| `Glow` / Soft Glow | Adds a subdued level-driven halo                  |
+| `Trail`          | Adds 400 ms of fading display persistence, distinct from Peak Trace's held envelope |
+| `Outline`        | Emphasizes the active signal edge                   |
+
+<a id="themes"></a>
+
+## 🎨 Colour Palettes and Appearance
+
+Choose one of the 13 signal palettes without discarding a preferred light or dark workspace. The
+independent **Appearance** setting offers Palette, System, Dark, Light, and High Contrast. Palette uses
+the palette's original application appearance; the other choices adapt signal contrast to the chosen
+surfaces. System reads the Windows appearance preference without changing it.
+
+History views use a separate ordered intensity ramp and a visible level legend. Threshold crossings
+and stereo channels use stable labels and drawing cues instead of relying only on the palette's hues.
+
+| Theme                     | Palette                                                 | Best For                                           |
+| ------------------------- | ------------------------------------------------------- | -------------------------------------------------- |
+| `ClassicSmooth` (default) | Green → amber → orange → pale peach                     | Traditional spectrum display                       |
+| `Ice`                     | Blue → cyan → pale ice                                  | Cool, calm analysis                                |
+| `Sunset`                  | Copper → amber → cream                                 | Warm spectrum display                              |
+| `MonoCyan`                | Blue-cyan lightness ladder                              | Clean technical display                            |
+| `Synthwave`               | Violet → magenta → pale cyan                            | Retro colour accents                               |
+| `Aurora`                  | Emerald → cyan → pale lavender                          | Cool luminous display                              |
+| `Obsidian Gold`           | Warm gold → pale gold                                  | Gold accents on dark surfaces                      |
+| `Midnight Prism`          | Violet → cyan → pale ice                                | Cool colours on dark surfaces                      |
+| `Emerald Noir`            | Green → jade → pale lime                                | Green signals on neutral surfaces                  |
+| `Crimson Velvet`          | Dusty rose → peach → cream                              | Warm signal colours                                |
+| `Studio`                  | Teal → blue → pale blue on graphite/slate chrome         | Neutral analytical workspace                       |
+| `Platinum Light`          | Contrasting signal palette on light instrument surfaces | Bright workspaces and readable light controls      |
+| `High Contrast`           | Ordered high-visibility signals, black surfaces and clear focus | High-visibility monitoring and clear control boundaries |
+
+---
+
+<a id="configuration"></a>
+
+## ⚙️ Configuration
+
+> [!IMPORTANT]
+> Saved per-user selections take precedence over `App.config` on later launches.
+
+`Spectrum\App.config` supplies the initial mode, style, and theme at build time and is copied to `Spectrum.exe.config` beside the executable. For an already-built distribution, edit that deployed configuration before starting Spectrum:
+
+Runtime selections apply immediately for the current session and do not modify `App.config`.
+The selected mode, effect, palette, independent Guides and Appearance choices, Fixed/Random choice, and random interval are saved in the current Windows user's application settings; saved choices take precedence over `App.config` on later launches. The band-change range (±6, ±12, ±24, or ±72 dB; default ±12), monitoring threshold (−12, −18, −24, −36, or −48 dBFS; default −24), optional octave values and effect intensity (Subtle, Standard, or Strong) apply for the current session. Pin and display Freeze also apply for the current session. Waterfall resolution selects the corresponding fine or coarse mode, so it follows the saved mode selection.
+
+Legacy `Mode=Pulse` migrates to `Bricks` with `None`, `Mode=Glow` migrates to `Spectrum` plus `Glow`, and retired `Center`, `Mirror`, `Note Map`, and `Ambient Particles` values migrate safely to retained modes. An unset independent Guides preference inherits legacy `Style=Precision`; an explicit Guides choice takes precedence. Scanline remains a recognized legacy token but is not offered in the Style selector or random rotation.
+
+```xml
+<appSettings>
+  <add key="Mode" value="Bricks"/>
+  <add key="Style" value="None"/>
+  <add key="Theme" value="ClassicSmooth"/>
+</appSettings>
+```
+
+<a id="tests"></a>
+
+## 🧪 Tests
+
+`Spectrum.Tests` uses xUnit and targets .NET Framework 4.8. The suite covers FFT correctness, band geometry, tone levels and sweeps, white/pink noise, stereo and anti-phase semantics, numerical safety, concurrent sample history, elapsed-time ballistics, capture recovery, settings, rendering, workspace navigation, session integrity, and Release packaging.
+
+After building the Release solution, run from a Visual Studio developer shell with VSTest available. Use an **x86 test host** to match the application and bundled native audio libraries:
+
+```powershell
+vstest.console.exe .\Spectrum.Tests\bin\Release\net48\Spectrum.Tests.dll /Platform:x86
+```
+
+Some native-window, live-audio, and desktop-stability verification helpers are separate from ordinary xUnit discovery and require an interactive Windows desktop and suitable audio devices or reference files. A regression-suite result alone does not establish those integration results or guarantee achieved display FPS.
+
+Historical reports under `artifacts/audit/` are local, ignored build evidence and are not included in the repository. Results from those reports apply to their recorded artifacts and environments. Run the relevant checks against the exact build you intend to use and record its environment alongside the results.
+
+<a id="dependencies"></a>
+
+## 📦 Dependencies
+
+| Library          | Version  | Source                            |
+| ---------------- | -------- | --------------------------------- |
+| `Bass.Net`       | 2.4.11.1 | Included in `Spectrum\Ref_Files\` |
+| `NAudio`         | 1.7.3    | Included in `Spectrum\Ref_Files\` |
+| `bass.dll`       | —        | Native BASS audio library         |
+| `basswasapi.dll` | —        | Native BassWASAPI extension       |
+
+The application also restores `System.Buffers` 4.5.0, `System.Memory` 4.5.3, `System.Numerics.Vectors` 4.5.0, `System.Resources.Extensions` 4.6.0, and `System.Runtime.CompilerServices.Unsafe` 4.5.2 through [packages.config](Spectrum/packages.config). Test dependencies are declared separately in [Spectrum.Tests.csproj](Spectrum.Tests/Spectrum.Tests.csproj). See [third-party notices and provenance](THIRD_PARTY_NOTICES.md) for bundled audio-library versions and redistribution terms.
+
+---
+
+<a id="project-structure"></a>
+
+## 🗂️ Project Structure
+
+The repository keeps capture/analysis, DSP, presentation ballistics, rendering, configuration, and native references clearly separated:
+
+```text
+Spectrum/
+├── Spectrum.sln
+├── Spectrum/
+│   ├── Analyzer.cs                  # Device handling, WASAPI capture, analysis scheduling, publication
+│   ├── CaptureGate.cs               # Per-tick decision: analyze, publish silence, wait, or reset a hung stream
+│   ├── Dsp/                         # Measurement: FFT (RadixTwoFft), band plan, band-power analyzer, dB scale, sample history
+│   ├── BarBallistics.cs             # Time-based attack / release / peak-hold math used by the bars
+│   ├── FormAudioSpectrum.cs         # Main form — renders bars, handles events
+│   ├── FormAudioSpectrum.Designer.cs
+│   ├── MainWorkspaceShell.cs        # Visualize / Analyze / Compare / Sessions navigation
+│   ├── MainSpectrumInspector.cs     # Inspection of displayed frequency-band measurements
+│   ├── AnalysisWorkspace.cs         # Shared measurements, references, settings, and export
+│   ├── AnalysisWorkbenchForm.cs     # Embedded and separate analysis interface
+│   ├── AnalysisPlotControl.cs       # Analysis plots and interaction
+│   ├── AnalysisAudioFile.cs         # Offline decoding and input limits
+│   ├── AnalysisSessionLibrary.cs    # Local session/reference persistence
+│   ├── SessionLibraryControl.cs     # Session browser, import, and export
+│   ├── VisualizationBrowser.cs      # View search, previews, favorites, and recent views
+│   ├── VerticalProgressBar.cs       # Custom control — one animated bar
+│   ├── AdvancedVisualizationControl.cs, WaveSpectrumControl.cs, AmbientParticleFieldControl.cs
+│   │                                # Renderers for the non-bar visualization modes
+│   ├── VisualStyle.cs, VisualTheme.cs, BarColorThemes.cs
+│   │                                # Styles, themes, and colour palettes
+│   ├── VisualizerPreferences.cs     # Saved per-user mode/style/theme preferences
+│   ├── RotationSettingsForm.cs      # Fixed/Random rotation settings dialog (Ctrl+R)
+│   ├── Ambiance Theme.cs            # Visual theme applied to the form
+│   ├── Device.cs                    # WASAPI device descriptor
+│   ├── Taskbar.cs                   # Windows taskbar progress state helper
+│   ├── Program.cs                   # Entry point with single-instance mutex
+│   ├── App.config                   # Initial mode/style/palette and DPI configuration
+│   ├── packages.config              # Managed runtime package versions
+│   ├── Ref_Files/                   # Bass.Net.dll, NAudio.dll, bass.dll, basswasapi.dll
+│   └── Spectrum.csproj
+└── Spectrum.Tests/                  # xUnit tests: FFT, band plan, stereo, timing, themes, performance
+```
+
+---
 
 <a id="gallery"></a>
 
@@ -263,204 +475,6 @@ _Estimated relative power shares with consistent bass, mid, and high identities.
 
 _Seven FFT-measured bands in dBFS, using the full-scale-sine power reference._
 
-<a id="styles"></a>
-
-## 🪄 Visual Effects and Reference Guides
-
-The mode owns the geometry; the **Effects** selector adds a compatible presentation effect. `None` is
-the safe default. Effects use the current display levels or captured display-frame history; Pulse is a
-level-driven brightness effect, not beat detection. Incompatible effects fall back to None when changing
-modes. Random rotation selects only effects exposed for the selected mode.
-
-**Reference Guides** are independent of the effect. They add drawing references without changing audio
-measurement accuracy. Legacy `Precision` settings migrate to enabled guides when the independent guide
-preference has not been set. Legacy `Scanline` settings still parse for compatibility, but Scanline is
-retired from the effect picker and recommended presets.
-
-| Style            | Effect                                              |
-| ---------------- | --------------------------------------------------- |
-| `None` (default) | No overlay                                          |
-| `Pulse`          | Brightens in proportion to the current signal level |
-| `Glow` / Soft Glow | Adds a subdued level-driven halo                  |
-| `Trail`          | Adds 400 ms of fading display persistence, distinct from Peak Trace's held envelope |
-| `Outline`        | Emphasizes the active signal edge                   |
-
-<a id="themes"></a>
-
-## 🎨 Colour Palettes and Appearance
-
-Choose one of the 13 signal palettes without discarding a preferred light or dark workspace. The
-independent **Appearance** setting offers Palette, System, Dark, Light, and High Contrast. Palette uses
-the palette's original application appearance; the other choices adapt signal contrast to the chosen
-surfaces. System reads the Windows appearance preference without changing it.
-
-History views use a separate ordered intensity ramp and a visible level legend. Threshold crossings
-and stereo channels use stable labels and drawing cues instead of relying only on the palette's hues.
-
-| Theme                     | Palette                                                 | Best For                                           |
-| ------------------------- | ------------------------------------------------------- | -------------------------------------------------- |
-| `ClassicSmooth` (default) | Green → amber → orange → pale peach                     | Traditional spectrum display                       |
-| `Ice`                     | Blue → cyan → pale ice                                  | Cool, calm analysis                                |
-| `Sunset`                  | Copper → amber → cream                                 | Warm spectrum display                              |
-| `MonoCyan`                | Blue-cyan lightness ladder                              | Clean technical display                            |
-| `Synthwave`               | Violet → magenta → pale cyan                            | Retro colour accents                               |
-| `Aurora`                  | Emerald → cyan → pale lavender                          | Cool luminous display                              |
-| `Obsidian Gold`           | Warm gold → pale gold                                  | Gold accents on dark surfaces                      |
-| `Midnight Prism`          | Violet → cyan → pale ice                                | Cool colours on dark surfaces                      |
-| `Emerald Noir`            | Green → jade → pale lime                                | Green signals on neutral surfaces                  |
-| `Crimson Velvet`          | Dusty rose → peach → cream                              | Warm signal colours                                |
-| `Studio`                  | Teal → blue → pale blue on graphite/slate chrome         | Neutral analytical workspace                       |
-| `Platinum Light`          | Contrasting signal palette on light instrument surfaces | Bright workspaces and readable light controls      |
-| `High Contrast`           | Ordered high-visibility signals, black surfaces and clear focus | High-visibility monitoring and clear control boundaries |
-
----
-
-<a id="configuration"></a>
-
-## ⚙️ Configuration
-
-> [!IMPORTANT]
-> Saved per-user selections take precedence over `App.config` on later launches.
-
-`Spectrum\App.config` supplies the initial mode, style, and theme at build time and is copied to `Spectrum.exe.config` beside the executable. For an already-built distribution, edit that deployed configuration before starting Spectrum:
-
-Runtime selections apply immediately for the current session and do not modify `App.config`.
-The selected mode, effect, palette, independent Guides and Appearance choices, Fixed/Random choice, and random interval are saved in the current Windows user's application settings; saved choices take precedence over `App.config` on later launches. The band-change range (±6, ±12, ±24, or ±72 dB; default ±12), monitoring threshold (−12, −18, −24, −36, or −48 dBFS; default −24), optional octave values and effect intensity (Subtle, Standard, or Strong) apply for the current session. Pin and display Freeze also apply for the current session. Waterfall resolution selects the corresponding fine or coarse mode, so it follows the saved mode selection.
-
-Legacy `Mode=Pulse` migrates to `Bricks` with `None`, `Mode=Glow` migrates to `Spectrum` plus `Glow`, and retired `Center`, `Mirror`, `Note Map`, and `Ambient Particles` values migrate safely to retained modes. An unset independent Guides preference inherits legacy `Style=Precision`; an explicit Guides choice takes precedence. Scanline remains a recognized legacy token but is not offered in the Effects selector or random rotation.
-
-```xml
-<appSettings>
-  <add key="Mode" value="Bricks"/>
-  <add key="Style" value="None"/>
-  <add key="Theme" value="ClassicSmooth"/>
-</appSettings>
-```
-
-<a id="requirements"></a>
-
-## 📋 Requirements
-
-> [!IMPORTANT]
-> The application targets **Windows** and **.NET Framework 4.8** and depends on the included native BASS libraries.
-
-- **To run:** Windows, [.NET Framework 4.8](https://dotnet.microsoft.com/download/dotnet-framework/net48), and the complete Release output folder, including the native x86 `bass.dll` and `basswasapi.dll` libraries.
-- **To build:** Visual Studio 2022 with the .NET desktop development workload and .NET Framework 4.8 Developer/Targeting Pack, or equivalent full-framework MSBuild tools. The native references are included in `Spectrum\Ref_Files\`; restore the solution's NuGet dependencies before building.
-
----
-
-<a id="build"></a>
-
-## 🏗️ Build
-
-Open `Spectrum.sln` in Visual Studio, select Release, restore NuGet packages and build (`Ctrl+Shift+B`), or run from a Visual Studio Developer PowerShell with MSBuild available:
-
-```powershell
-msbuild .\Spectrum.sln -restore -p:RestorePackagesConfig=true -p:Configuration=Release
-msbuild .\Spectrum.sln -t:Clean,Build -p:Configuration=Release
-```
-
-The output is placed in `Spectrum\bin\Release\`.
-
-The Release application folder contains **12 essential root files and no subfolders**: the executable, configuration, nine managed/native runtime DLLs, and one `THIRD_PARTY_NOTICES.md`. Release builds omit development XML documentation and combine all five bundled package notice payloads verbatim into that single notice. Unused WindowsMediaFormat and NuGet ConfigurationManager DLLs are no longer deployed; the application retains the framework's `System.Configuration`. Required runtime dependencies are not embedded or deleted. Debug/test outputs remain separate. See [dependency terms and provenance](THIRD_PARTY_NOTICES.md) before redistribution; build success does not certify a publisher's private licensing agreements.
-
-<a id="tests"></a>
-
-## 🧪 Tests
-
-> [!NOTE]
-> The test suite is signal-driven and deterministic, covering analysis correctness as well as timing, concurrency, stereo behavior, and per-frame cost.
-
-`Spectrum.Tests` (xUnit, .NET Framework 4.8) validates the analysis with deterministic synthetic signals:
-FFT correctness, band-plan geometry, a tone at every bar's centre, amplitude accuracy, band-boundary
-and sweep behaviour, multi-tone independence, white/pink noise, stereo semantics (including anti-phase),
-numerical safety, lock-free sample-history consistency under a concurrent producer, frame-rate
-independent ballistics and end-to-end onset/release timing, instrument-like signals, and per-frame cost.
-
-```powershell
-# After building Release, use a Visual Studio developer shell with VSTest available.
-# Match the application's 32-bit runtime and bundled native libraries:
-vstest.console.exe .\Spectrum.Tests\bin\Release\net48\Spectrum.Tests.dll /Platform:x86
-
-# Alternative with the .NET SDK installed; the default test-host architecture may differ:
-dotnet test .\Spectrum.Tests\bin\Release\net48\Spectrum.Tests.dll
-```
-
-Additional regressions cover full-scale packed capture levels, elapsed-time peak hold, invalid sample-history writes, FFT window validation, mode sorting and vector icons, settings persistence, accessible chrome, and capture recovery. The results below apply only to their stated artifacts and do not certify unexecuted environments.
-
-The **2026-10-22 agent-role integration** passed **1,225/1,225 x86 regression cases**, zero failed/skipped, including 41 new data-integrity and presentation cases. The actual Release executable, all twelve shown analysis features, eight native file workflows, 1,203 navigation actions, all 21 visualization modes, real output/default capture, WAV/MP3/FLAC analysis and 14 selected audio reference vectors passed on the same executable. Operational previews now use real paired snapshots or empty states; invalid data fails explicitly, provenance survives export and missing time/temporal baselines remain distinct from measured silence. See the [current report and exact identity](artifacts/audit/agent-roles/REPORT.md), [feature map](artifacts/audit/agent-roles/FEATURE_EVIDENCE.md) and [seven-role specifications](docs/agent-roles/README.md) for the observed scope and limits.
-
-The earlier **2026-10-22 unified Spectrum workspace revision** passed **1,184/1,184 x86 regression cases**, zero failed/skipped. Separate runs exercised the actual executable at native DPI 144, all twelve analysis features, ten presentation interactions, six workbench file dialogs, session-library import/export, 1,203 native navigation actions and all 21 visualization modes. Native output/default-following capture, WAV/MP3/FLAC analysis, five selected ITU loudness vectors and nine EBU true-peak vectors passed on the same frozen executable. See its [original report and build identity](artifacts/audit/main-workspace/REPORT.md) and [workspace guide](SPECTRUM_STUDIO.md) for observed scope and hardware/DPI/performance limits.
-
-The earlier **2026-10-21 shared-window-icon revision** passed **29/29 affected UI cases** and actual native small/large icon checks across all five application windows, including two close/reopen checks. The Release executable passed startup and orderly shutdown. This revision's hash, screenshots and resource-dependency setup are recorded in `artifacts/audit/form-icons/REPORT.md`; the earlier full-regression count below applies to its stated Workbench artifact.
-
-The **2026-10-21 modern Analysis Workbench revision** passed **1,104/1,104 x86 regression cases**, zero failed/skipped, including 120 focused analysis/UI cases. Separate shown-application checks exercised all twelve analysis features, ten modern interactions, six native file-dialog workflows, twelve additional shortcut/recovery paths and 1,203 navigation actions without exceptions or changed measured power. Actual Release startup/shutdown, default/explicit active-output capture, WAV/MP3/FLAC analysis, five selected ITU loudness vectors and nine EBU true-peak vectors also passed. Exact build hashes, screenshots and hardware/DPI/reference limits are recorded in `artifacts/audit/modern-workbench/REPORT.md`; see the [Workbench guide](ANALYSIS_WORKBENCH.md) and [acceptance cases](ANALYSIS_WORKBENCH_TEST_CASES.md).
-
-The **2026-10-17 complete GUI revision** passed **921/921 x86 cases**, zero failed/skipped, after a clean Release rebuild. Coverage includes all 21 modes with matched silent/quiet/stereo input, independent Guides migration, legacy identifiers, focused-selector shortcuts, frozen display timers and resume baselines, ordered history legends, adjustable delta and threshold references, waveform axes, octave values, stable semantic colors, nine preset previews, PNG serialization, native meter frames and handle recreation, radial text ownership at 96/144/192 DPI, composite axes, compact toolbar overflow, and repeated native menu activation/focus changes. All 21 modes met the existing **16.667 ms mean direct-drawing target at 1920×1080** on the verification machine; this measures direct painting, not compositor FPS or an every-frame deadline. Populated Waterfall and 20-second Dynamics History views were also inspected with live stereo capture. Audio capture and DSP implementations were unchanged.
-
-The previously verified **2026-10-14 1200 x 480 / 12-file Release** passed **751/751 x86 cases**, zero failed/skipped, retaining all 729 preceding names and adding 22 default-window, responsive-layout, working-area and packaging cases. For that artifact, clean, seeded legacy-output migration and repeated already-clean builds passed; all twelve distribution hashes remained identical. This retained result is artifact-specific, separate from earlier releases, and is not a claim that the latest source has been retested.
-
-The preceding fixed-window release passed **729 x86 cases**, with none failed or skipped, retaining all 705 preceding test names and adding 24 exact-window/layout cases. Mode switching preserves the user's window bounds, client size and minimum size; compact Stereo Spectrum uses side-by-side panels instead of enlarging the window. Coverage includes genuinely shown native selector/accessibility checks at 100/125/150/200% equivalent control/font scaling, radial geometry at 96/144/192 DPI, exact-pixel cached-meter comparisons, timestamp/gap-preserving Dynamics History batching, rapid peak/drop/silence behavior, populated Trail expiry at 30/60/144 Hz and conditional-paint nonzero idle convergence. All 19 modes met the unchanged **16.667ms mean direct-drawing target at 1920×1080**; this is a mean direct-drawing result, not an every-frame deadline or compositor 60FPS guarantee.
-
-<a id="running"></a>
-
-## ▶️ Running
-
-> [!TIP]
-> No input-device selection is required for normal use: capture starts from the Windows default audio output through WASAPI loopback.
-
-Run `Spectrum.exe` from the build output directory. The application automatically selects the Windows default audio output device (WASAPI loopback) and begins capturing.
-
-The default client area is **1200 x 480 at the existing 96-DPI baseline**. Startup and display-work-area changes shrink oversized windows to the available working area without enlarging smaller user-selected windows; mode changes never resize the frame. The existing 900 x 250 technical minimum remains. If a work area is smaller than that minimum, the top-left corner stays accessible, but full containment is physically impossible. Windows retains the application's existing scaling behavior; no new per-monitor-DPI contract or restart-size persistence is implied.
-
-<a id="dependencies"></a>
-
-## 📦 Dependencies
-
-| Library          | Version  | Source                            |
-| ---------------- | -------- | --------------------------------- |
-| `Bass.Net`       | 2.4.11.1 | Included in `Spectrum\Ref_Files\` |
-| `NAudio`         | 1.7.3    | Included in `Spectrum\Ref_Files\` |
-| `bass.dll`       | —        | Native BASS audio library         |
-| `basswasapi.dll` | —        | Native BassWASAPI extension       |
-
----
-
-<a id="project-structure"></a>
-
-## 🗂️ Project Structure
-
-The repository keeps capture/analysis, DSP, presentation ballistics, rendering, configuration, and native references clearly separated:
-
-```text
-Spectrum/
-├── Spectrum.sln
-├── Spectrum/
-│   ├── Analyzer.cs                  # Device handling, WASAPI capture, analysis scheduling, publication
-│   ├── CaptureGate.cs               # Per-tick decision: analyze, publish silence, wait, or reset a hung stream
-│   ├── Dsp/                         # Measurement: FFT (RadixTwoFft), band plan, band-power analyzer, dB scale, sample history
-│   ├── BarBallistics.cs             # Time-based attack / release / peak-hold math used by the bars
-│   ├── FormAudioSpectrum.cs         # Main form — renders bars, handles events
-│   ├── FormAudioSpectrum.Designer.cs
-│   ├── VerticalProgressBar.cs       # Custom control — one animated bar
-│   ├── AdvancedVisualizationControl.cs, WaveSpectrumControl.cs, AmbientParticleFieldControl.cs
-│   │                                # Renderers for the non-bar visualization modes
-│   ├── VisualStyle.cs, VisualTheme.cs, BarColorThemes.cs
-│   │                                # Styles, themes, and colour palettes
-│   ├── VisualizerPreferences.cs     # Saved per-user mode/style/theme preferences
-│   ├── RotationSettingsForm.cs      # Fixed/Random rotation settings dialog (Ctrl+R)
-│   ├── Ambiance Theme.cs            # Visual theme applied to the form
-│   ├── Device.cs                    # WASAPI device descriptor
-│   ├── Taskbar.cs                   # Windows taskbar progress state helper
-│   ├── Program.cs                   # Entry point with single-instance mutex
-│   ├── App.config                   # Mode configuration
-│   ├── Ref_Files/                   # Bass.Net.dll, NAudio.dll, bass.dll, basswasapi.dll
-│   └── Spectrum.csproj
-└── Spectrum.Tests/                  # xUnit tests: FFT, band plan, stereo, timing, themes, performance
-```
-
----
-
 <a id="measurement"></a>
 
 ## 📐 Measurement
@@ -514,7 +528,7 @@ into neighbouring bands; the amount depends on frequency, sample rate, and band 
 one channel alone reads −3 dB, and phase between channels never changes the level. On multichannel devices
 only the front pair is measured.
 
-**Meter conventions.** The frequency spectrum uses a full-scale-sine power reference. PCM RMS and sample-peak meters instead use amplitude-relative digital full scale: a full-scale sine has approximately −3.0103 dBFS RMS and 0 dBFS sample peak. These legacy displays do not claim calibrated LUFS, SPL, VU, standardized PPM, or oversampled true-peak measurement. The separate [Analysis Workbench](ANALYSIS_WORKBENCH.md) adds mono/stereo loudness and an oversampled true-peak estimate with its own validation and limits. Mono sources do not invent a second channel.
+**Meter conventions.** The frequency spectrum uses a full-scale-sine power reference. PCM RMS and sample-peak meters instead use amplitude-relative digital full scale: a full-scale sine has approximately −3.0103 dBFS RMS and 0 dBFS sample peak. These legacy displays do not claim calibrated LUFS, SPL, VU, standardized PPM, or oversampled true-peak measurement. The separate [Analysis Workbench](#workspaces) adds mono/stereo loudness and an oversampled true-peak estimate; these are not certified meter or acoustic sound-pressure measurements. Mono sources do not invent a second channel.
 
 **Seven-band ranges.** Advanced Spectral Balance trims partially supported bands at the captured Nyquist limit and marks unreachable bands unavailable. For example, 32 kHz capture measures the final band over 10–16 kHz; 22.05 kHz capture measures 10–11.025 kHz. Exact range labels are omitted together when a compact canvas cannot fit them legibly. This view has an 800 ms held-peak interval followed by 24 dB/s decay, separate from the radial display's 300 ms hold. Its animation uses elapsed time and sleeps outside an active, visible, unfrozen seven-band view with supplied measurements.
 
@@ -564,18 +578,18 @@ bars trail treble bars by roughly 0.1 s. This is the time/frequency trade-off of
 - A hang detector monitors consecutive identical WASAPI levels and forces a device reset if the stream appears stuck
 - Captured zero PCM publishes available zero spectra and bars decay with their release time. Nonzero PCM overrides a native zero-level hint; a lack of current captured frames is reported as unavailable.
 
-The [2026-10-20 engineering audit](AUDIT-2026-10-20.md) records the issue register, measurement definitions, before/after evidence, reproducible runtime probes and release gates. Its results apply to the tested artifact and environments.
+Capture scheduling and recovery are implemented in `Analyzer.cs` and `CaptureGate.cs`; regression coverage is in `Spectrum.Tests`. See [Project Structure](#project-structure) for the main implementation boundaries and [Tests](#tests) for verification scope.
 
 ---
 
 ## Documentation links
 
-[Read all Spectrum Audio Analyzer guides online](https://gcfernando.github.io/spectrum-analyzer/documentation/) · [Project overview](https://gcfernando.github.io/spectrum-analyzer/) · [All developer projects](https://gcfernando.github.io/gcfernando/projects/)
+[Documentation index](documentation.md) · [Dependency notices](THIRD_PARTY_NOTICES.md) · [Published documentation](https://gcfernando.github.io/spectrum-analyzer/documentation/) · [Project overview](https://gcfernando.github.io/spectrum-analyzer/) · [All developer projects](https://gcfernando.github.io/gcfernando/projects/)
 
 ### Verification and redistribution limitations
 
-Spectrum provides measured frequency-band displays, PCM views, and FFT analysis. The dated verification results above describe the tested artifacts and conditions; screenshots demonstrate presentation rather than numerical calibration.
+Spectrum provides measured frequency-band displays, PCM views, and FFT analysis. Screenshots demonstrate presentation rather than numerical calibration. See [Tests](#tests) for the distinction between automated regressions and desktop/audio integration checks.
 
-Use the complete `Spectrum\bin\Release` output folder; the included native BASS libraries are x86, and an x64-named solution configuration is not an x64-native distribution. .NET Framework 4.8 and Windows remain required. WASAPI loopback observes the selected endpoint's combined output, not an isolated Spotify session; exclusive/protected streams may not be accessible.
+Use the complete `Spectrum\bin\Release` output folder; the included native BASS libraries are x86, and an x64-named solution configuration is not an x64-native distribution. .NET Framework 4.8 and Windows remain required. WASAPI loopback observes the selected endpoint's combined output, rather than an isolated application session; exclusive/protected streams may not be accessible.
 
-Bundled third-party binaries require the owner's redistribution/license authorization and appropriate notices before a production release. This checkout does not establish that authorization. Performance and compatibility remain subject to the tested conditions described above.
+Bundled third-party binaries require the owner's redistribution/license authorization and appropriate notices before a production release. This checkout does not establish that authorization. Performance and compatibility depend on the hardware, selected source, installed decoders, display scaling, and workload.
