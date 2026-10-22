@@ -73,7 +73,7 @@ To install Spectrum, follow [Download and install](#download). To build it yours
 
 The installer checks for **.NET Framework 4.8 or later** and explains how to obtain it if missing. It is currently unsigned. A `SpectrumSetup.exe.sha256` file accompanies each installer in [Releases](https://github.com/gcfernando/spectrum-analyzer/releases).
 
-The [release pipeline](.github/workflows/release.yml) runs on every branch push and can also be started manually from GitHub Actions. It restores and builds Release with Visual Studio 2026 and C# 14 on Windows, runs the x86 regression suite, compiles an installer, checks installation/reinstallation and payload hashes, and verifies uninstallation before publishing a release. Builds from other branches are marked as prereleases. The newest successful default-branch build updates the permanent download link after verification; failures leave the previous download available, and slower older builds cannot replace a newer published build. Live-audio and separate desktop integration helpers are outside this pipeline.
+The [release pipeline](.github/workflows/release.yml) runs on every branch push and can also be started manually from GitHub Actions. It restores and builds **.NET Framework 4.8 Release with an explicit x86 target** using Visual Studio 2026 and C# 14 on Windows. Before testing or packaging, it verifies that both compiled assemblies declare .NET Framework 4.8 and require x86. The Visual Studio VSTest runner executes the regression suite with `/Platform:x86` and `/Framework:.NETFramework,Version=v4.8`. The pipeline then compiles an installer, checks installation/reinstallation and payload hashes, and verifies uninstallation before publishing a release. Builds from other branches are marked as prereleases. The newest successful default-branch build updates the permanent download link after verification; failures leave the previous download available, and slower older builds cannot replace a newer published build. Live-audio and separate desktop integration helpers are outside this pipeline.
 
 Native UI tests need more desktop space than the hosted runner's default display provides. [CI desktop setup](scripts/Configure-CiDesktop.ps1) provisions a signed virtual display on the disposable GitHub-hosted machine, with pinned dependency hashes and signature checks. This test dependency is excluded from the Spectrum installer and is not installed on end users' computers.
 
@@ -98,7 +98,7 @@ The download link becomes available after this workflow is pushed and its first 
 Open `Spectrum.sln` in Visual Studio, select Release, restore NuGet packages and build (`Ctrl+Shift+B`), or run from a Visual Studio Developer PowerShell with MSBuild available:
 
 ```powershell
-msbuild .\Spectrum.sln -restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:LangVersion=14.0
+msbuild .\Spectrum.sln -restore -t:Rebuild -p:RestorePackagesConfig=true -p:Configuration=Release -p:Platform=x86 -p:PlatformTarget=x86 -p:LangVersion=14.0
 ```
 
 The output is placed in `Spectrum\bin\Release\`.

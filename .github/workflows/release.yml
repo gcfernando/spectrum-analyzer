@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: Build, test, and verify installer
+    name: Build .NET Framework 4.8 x86 and verify installer
     runs-on: windows-2025-vs2026
     timeout-minutes: 30
     defaults:
@@ -26,18 +26,30 @@ jobs:
         uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
         with:
           vs-version: '[18.0,19.0)'
+          # This selects the build tool process; PlatformTarget below selects the application architecture.
           msbuild-architecture: x64
 
-      - name: Restore and build Release
-        run: msbuild Spectrum.sln -restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:LangVersion=14.0 -verbosity:minimal -nologo
+      - name: Restore and build .NET Framework 4.8 Release x86
+        run: msbuild Spectrum.sln -restore -t:Rebuild -p:RestorePackagesConfig=true -p:Configuration=Release -p:Platform=x86 -p:PlatformTarget=x86 -p:LangVersion=14.0 -verbosity:minimal -nologo
+
+      - name: Verify .NET Framework 4.8 and x86 build output
+        run: |
+          $powershell = Join-Path $env:WINDIR 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
+          & $powershell -NoProfile -NonInteractive -File .\scripts\Verify-CiBuild.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'The build does not satisfy the .NET Framework 4.8 x86 requirements.' }
 
       - name: Configure desktop for native UI tests
         shell: powershell
         timeout-minutes: 6
         run: .\scripts\Configure-CiDesktop.ps1
 
-      - name: Run x86 regression suite
-        run: dotnet vstest .\Spectrum.Tests\bin\Release\net48\Spectrum.Tests.dll /Platform:x86 '/Logger:console;verbosity=normal' '/Logger:trx;LogFileName=tests.trx' /ResultsDirectory:TestResults
+      - name: Run .NET Framework 4.8 regression suite in x86
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $runner = @(& $vswhere -latest -version '[18.0,19.0)' -products '*' -find 'Common7\IDE\Extensions\TestPlatform\vstest.console.exe')
+          if ($LASTEXITCODE -ne 0 -or $runner.Count -ne 1) { throw 'Visual Studio VSTest runner was not found.' }
+          & $runner[0] .\Spectrum.Tests\bin\Release\net48\Spectrum.Tests.dll /Platform:x86 '/Framework:.NETFramework,Version=v4.8' '/Logger:console;verbosity=normal' '/Logger:trx;LogFileName=tests.trx' /ResultsDirectory:TestResults
+          if ($LASTEXITCODE -ne 0) { throw 'The .NET Framework 4.8 x86 regression suite failed.' }
 
       - name: Compile Windows installer
         run: |
