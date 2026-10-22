@@ -39,6 +39,14 @@ foreach ($file in @((Join-Path $driverSource 'mttvdd.cat'), $installer)) {
     }
     Write-Output 'Signature is valid.'
 }
+# PnP requires the verified publisher to be trusted for unattended installation.
+# Trust only this valid signing leaf on the disposable VM, never a new root CA.
+$catalogSignature = Get-AuthenticodeSignature -LiteralPath (Join-Path $driverSource 'mttvdd.cat')
+$publisherPath = Join-Path $tools 'driver-publisher.cer'
+[IO.File]::WriteAllBytes($publisherPath, $catalogSignature.SignerCertificate.Export(
+    [Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+Import-Certificate -FilePath $publisherPath -CertStoreLocation 'Cert:\LocalMachine\TrustedPublisher' | Out-Null
+Write-Output 'Configured the validated driver publisher for unattended installation.'
 # The driver's documented configuration location is separate from the application payload.
 $driverDirectory = 'C:\VirtualDisplayDriver'
 if (Test-Path -LiteralPath $driverDirectory) { throw 'A virtual display is already provisioned on this runner.' }
