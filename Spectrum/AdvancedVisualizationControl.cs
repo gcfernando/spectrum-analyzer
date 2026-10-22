@@ -71,6 +71,12 @@ public sealed class AdvancedVisualizationControl : Control
 
     private readonly byte[] _spectrum = new byte[BandCount];
     private readonly byte[] _previousSpectrum = new byte[BandCount];
+    private bool _fluxBaselineValid, _fluxComparisonAvailable;
+    private bool _fluxAudioBound, _fluxAudioAvailable, _fluxAudioFrameNew;
+    private object _fluxSourceEpoch;
+    private long _fluxEndFrame;
+    private int _fluxSampleRate, _fluxChannels;
+    internal bool LevelChangeHasComparison => _fluxComparisonAvailable;
     private byte[] _history;
     private readonly int[] _paletteArgb = new int[256];
     private int[] _historyPixels;
@@ -120,6 +126,10 @@ public sealed class AdvancedVisualizationControl : Control
     private Size _radialLayoutSize;
     private float _radialLayoutDpi;
     private PointF _radialCenter;
+    internal PointF RadialCenter => _radialCenter;
+    internal float RadialOuterRadius => _radialRadius;
+    internal RectangleF GetMatrixCardBounds(int band) => _matrixCards[band];
+    internal RectangleF StereoComparePlotBounds { get; private set; }
     private float _radialRadius;
     private bool _radialLabelsVisible;
     private readonly RectangleF[] _radialLabelBounds = new RectangleF[s_radialLabelBands.Length];
@@ -343,10 +353,11 @@ public sealed class AdvancedVisualizationControl : Control
 
             _mode = value;
             if (value == AdvancedVisualizationMode.SpectralFlux)
-                Array.Copy(_spectrum, _previousSpectrum, BandCount);
+                InvalidateFluxBaseline();
             if (IsMeasurementMode(value) && _style != VisualStyle.Precision)
                 _style = VisualStyle.None;
             UpdateHistoryCaption();
+            UpdateFluxAccessibility();
             UpdateSevenBandTimer();
             Invalidate();
         }
@@ -469,6 +480,7 @@ public sealed class AdvancedVisualizationControl : Control
         }
 
         _mode = NormalizeMode(mode);
+        UpdateFluxAccessibility();
         if (IsMeasurementMode(_mode) && _style != VisualStyle.Precision) _style = VisualStyle.None;
         UpdateHistoryCaption();
         UpdateSevenBandTimer();
@@ -490,6 +502,7 @@ public sealed class AdvancedVisualizationControl : Control
         ApplyThemeChrome(_theme);
         UpdatePalette();
         _mode = NormalizeMode(parsedMode);
+        UpdateFluxAccessibility();
         if (IsMeasurementMode(_mode) && _style != VisualStyle.Precision) _style = VisualStyle.None;
         UpdateHistoryCaption();
         UpdateSevenBandTimer();
@@ -1320,6 +1333,14 @@ public sealed class AdvancedVisualizationControl : Control
 
     private void PaintSpectralFlux(Graphics graphics, int width, int height)
     {
+        if (!_fluxComparisonAvailable)
+        {
+            var message = FluxWaitingMessage;
+            graphics.DrawString(message, Font, _textBrush,
+                new RectangleF(4, Math.Max(0, height * .5f - _paintFontHeight), Math.Max(1, width - 8), Math.Max(1, _paintFontHeight * 2)), _centeredText);
+            DrawCaption(graphics, width, "Level change requires two consecutive measured frames");
+            return;
+        }
         var center = height * 0.5f;
         var span = Math.Max(1, height * 0.5f - (height >= 80 ? 24 : 2));
         graphics.DrawLine(_majorGridPen, 0, center, width, center);
@@ -1495,6 +1516,15 @@ public sealed class AdvancedVisualizationControl : Control
     private void GetCurvePlotBounds(int width, int height, out float top, out float baseline)
     {
         top = GetCaptionHeight(width, height);
+        if (top == 0 && (_mode is AdvancedVisualizationMode.Contour or AdvancedVisualizationMode.PeakTrace
+            or AdvancedVisualizationMode.ThresholdMonitor))
+        {
+            // The host reserves room for these native dB/frequency labels.
+            // Avoid reserving a second font-height margin inside a compact curve.
+            top = 2;
+            baseline = Math.Max(top + 1f, height - 2f);
+            return;
+        }
         if (top == 0) top = Math.Max(2f, height * 0.06f);
         baseline = Math.Max(top + 1f, height - Math.Max(2f, Font.GetHeight(DeviceDpi) / 2f));
     }
@@ -1560,6 +1590,7 @@ public sealed class AdvancedVisualizationControl : Control
     {
         if (DisplayFrozen) return;
         _audio.Update(samples, frames, channels, sampleRate);
+        ObserveFluxAudio(_audio);
         UpdateSevenBandBallistics();
         UpdateAudioLabels();
         UpdateAnalysisLabels();
@@ -1570,6 +1601,7 @@ public sealed class AdvancedVisualizationControl : Control
     {
         if (DisplayFrozen) return;
         _audio.CopyFrom(data);
+        ObserveFluxAudio(_audio);
         UpdateSevenBandBallistics();
         UpdateAudioLabels();
         UpdateAnalysisLabels();
@@ -1600,6 +1632,8 @@ public sealed class AdvancedVisualizationControl : Control
         if (values == null) throw new ArgumentNullException(nameof(values));
         if (DisplayFrozen) return;
         ResetHistory();
+        // Synchronization seeds one already-observed snapshot, never an implicit zero.
+        if (_fluxAudioBound) _fluxAudioFrameNew = _fluxAudioAvailable;
         SetSpectrum(values);
         Array.Copy(_spectrum, _previousSpectrum, BandCount);
     }
@@ -1745,6 +1779,7 @@ public sealed class AdvancedVisualizationControl : Control
         var right = Math.Max(left + 1, width - (labeled ? 22 * scale : 2));
         var top = GetCaptionHeight(width, height) + 3 * scale;
         var bottom = Math.Max(top + 1, height - (labeled ? bodyHeight + 8 * scale : 2));
+        StereoComparePlotBounds = RectangleF.FromLTRB(left, top, right, bottom);
         DrawSpectrumGrid(graphics, left, right, top, bottom);
         if (labeled)
         {
@@ -1781,7 +1816,9 @@ public sealed class AdvancedVisualizationControl : Control
         var scale = graphics.DpiY / 96f;
         var bodyHeight = _analysisBodyFont.GetHeight(graphics);
         var titleHeight = _analysisTitleFont.GetHeight(graphics);
-        var labeled = width >= 340 * scale && height >= 130 * scale;
+        // Preserve the scale endpoints when enlarged toolbar text leaves a short
+        // plot. Intermediate labels can use a stride while all grid rows remain.
+        var labeled = width >= 340 * scale && height >= 4 * bodyHeight + 12 * scale;
         var compactIdentifiers = !labeled && width >= 180 * scale && height >= 80 * scale;
         var header = labeled ? bodyHeight + 10 * scale : 0;
         var footer = labeled ? bodyHeight + 7 * scale : 0;
@@ -1790,7 +1827,10 @@ public sealed class AdvancedVisualizationControl : Control
         var rightReserve = labeled ? Math.Max(10 * scale,
             graphics.MeasureString(SpectrumAxis.FrequencyLabels[15], _analysisBodyFont).Width / 2) : 2 * scale;
         var minimumPanelHeight = 12 * (bodyHeight + 2 * scale) + titleHeight + 15 * scale;
-        var columns = labeled && height - header - footer < 2 * minimumPanelHeight && width >= 600 * scale;
+        // A short viewport still needs separate left/right panels even when the
+        // full caption does not fit. Base orientation on usable panel width.
+        var columns = width >= 480 * scale && height - header - footer < 2 * minimumPanelHeight &&
+            width >= 2 * (leftReserve + rightReserve + 120 * scale) + 12 * scale;
         // A wrapped toolbar can leave a short, wide viewport. Keep all thirteen
         // reference ticks readable by consolidating repeated metadata, rather than
         // shrinking the window's text or silently dropping intermediate labels.
@@ -2382,8 +2422,15 @@ public sealed class AdvancedVisualizationControl : Control
         graphics.DrawString(text, Font, _textBrush, new RectangleF(4, 3, width - 8, captionHeight - 5), _centeredText);
     }
 
-    private int GetCaptionHeight(int width, int height) =>
-        width >= 180 && height >= 80 ? Math.Max(22, (int)Math.Ceiling(_paintFontHeight > 0 ? _paintFontHeight : Font.GetHeight()) + 9) : 0;
+    private int GetCaptionHeight(int width, int height)
+    {
+        // The selected mode and inspector already identify a compact calibrated
+        // spectrum. Keep its grid usable before reserving a repeated caption.
+        if ((_mode is AdvancedVisualizationMode.Contour or AdvancedVisualizationMode.PeakTrace
+            or AdvancedVisualizationMode.ThresholdMonitor) && height < 120 * DeviceDpi / 96f) return 0;
+        return width >= 180 && height >= 80
+            ? Math.Max(22, (int)Math.Ceiling(_paintFontHeight > 0 ? _paintFontHeight : Font.GetHeight()) + 9) : 0;
+    }
 
     private void DrawUnavailable(Graphics graphics, int width, int height)
     {
@@ -2499,6 +2546,7 @@ public sealed class AdvancedVisualizationControl : Control
 
     private void ResetHistory()
     {
+        InvalidateFluxBaseline();
         _historyWriteIndex = _historyCount = 0;
         _lastFrameTick = 0;
         _historySpanTenths = -1;
@@ -2676,12 +2724,23 @@ public sealed class AdvancedVisualizationControl : Control
         // Resume starts a fresh display history; the frozen interval is not an observed delta.
         var resumed = _resumeSpectrum;
         if (resumed) { ResetHistory(); _resumeSpectrum = false; }
+        if (_mode == AdvancedVisualizationMode.SpectralFlux && _fluxAudioBound && _fluxAudioAvailable &&
+            !_fluxAudioFrameNew && _fluxBaselineValid) return;
 
         var copyCount = Math.Min(values.Length, BandCount);
-        Array.Copy(_spectrum, _previousSpectrum, _spectrum.Length);
+        var observed = !_fluxAudioBound || (_fluxAudioAvailable && _fluxAudioFrameNew);
+        if (observed)
+        {
+            Array.Copy(_spectrum, _previousSpectrum, _spectrum.Length);
+            _fluxComparisonAvailable = _fluxBaselineValid;
+            _fluxBaselineValid = true;
+        }
+        else if (_fluxAudioBound && !_fluxAudioAvailable) InvalidateFluxBaseline();
         Array.Clear(_spectrum, 0, _spectrum.Length);
         Array.Copy(values, 0, _spectrum, 0, copyCount);
-        if (resumed) Array.Copy(_spectrum, _previousSpectrum, BandCount);
+        if (observed && !_fluxComparisonAvailable) Array.Copy(_spectrum, _previousSpectrum, BandCount);
+        if (_fluxAudioBound) _fluxAudioFrameNew = false;
+        UpdateFluxAccessibility();
         var tick = Stopwatch.GetTimestamp();
         var elapsedMs = _lastFrameTick == 0 ? 0f : (float)Math.Max(0, (tick - _lastFrameTick) * 1000d / Stopwatch.Frequency);
         _lastFrameTick = tick;
@@ -2703,6 +2762,38 @@ public sealed class AdvancedVisualizationControl : Control
             _historyCount++;
         }
         UpdateHistoryCaption();
+    }
+
+    private string FluxWaitingMessage => _fluxAudioBound && !_fluxAudioAvailable
+        ? "Audio unavailable · waiting for two measured frames"
+        : "Waiting for another measured frame";
+
+    private void InvalidateFluxBaseline()
+    {
+        _fluxBaselineValid = _fluxComparisonAvailable = false;
+        UpdateFluxAccessibility();
+    }
+
+    private void UpdateFluxAccessibility()
+    {
+        if (_mode == AdvancedVisualizationMode.SpectralFlux)
+            AccessibleDescription = _fluxComparisonAvailable
+                ? "Display-level change between two consecutive observed frames; quantized dB levels."
+                : FluxWaitingMessage;
+    }
+
+    private void ObserveFluxAudio(AudioVisualizationData data)
+    {
+        var boundary = !_fluxAudioBound || !_fluxAudioAvailable || !data.HasSamples ||
+            !ReferenceEquals(_fluxSourceEpoch, data.SourceEpoch) || _fluxSampleRate != data.SampleRate ||
+            _fluxChannels != data.Channels || data.EndFrame < _fluxEndFrame ||
+            data.EndFrame - _fluxEndFrame > data.WindowFrames;
+        _fluxAudioFrameNew = data.HasSamples && (boundary || data.EndFrame > _fluxEndFrame);
+        _fluxAudioBound = true; _fluxAudioAvailable = data.HasSamples;
+        _fluxSourceEpoch = data.SourceEpoch; _fluxSampleRate = data.SampleRate;
+        _fluxChannels = data.Channels; _fluxEndFrame = data.EndFrame;
+        if (boundary) InvalidateFluxBaseline();
+        else UpdateFluxAccessibility();
     }
 
     private static bool TryParseMode(string mode, out AdvancedVisualizationMode parsedMode)

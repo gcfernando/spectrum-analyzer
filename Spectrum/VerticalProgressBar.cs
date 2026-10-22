@@ -535,9 +535,9 @@ public sealed class VerticalProgressBar : ProgressBar
         _lightCanvas = theme.VisualizationSurface.GetBrightness() > 0.5f;
         BackColor = theme.VisualizationSurface;
         ForeColor = theme.PrimaryText;
-        _inactiveBrickColor = Color.FromArgb(38, theme.InactiveSignal);
-        _inactiveDotColor = Color.FromArgb(55, theme.InactiveSignal);
-        _inactiveSpectrumColor = Color.FromArgb(30, theme.InactiveSignal);
+        _inactiveBrickColor = Color.FromArgb(22, theme.InactiveSignal);
+        _inactiveDotColor = Color.FromArgb(34, theme.InactiveSignal);
+        _inactiveSpectrumColor = Color.FromArgb(18, theme.InactiveSignal);
         _waveBackgroundColor = Color.FromArgb(72, theme.InactiveSignal);
         _borderPen.Color = Color.FromArgb(28, theme.Frame);
         _innerEdgePen.Color = Color.FromArgb(12, theme.Divider);

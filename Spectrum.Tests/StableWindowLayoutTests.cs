@@ -155,7 +155,6 @@ public class StableWindowLayoutTests
                     var textHeight = bodyFont.GetHeight(control.DeviceDpi);
                     foreach (var plot in new[] { left, right })
                     {
-                        var lastTextBottom = float.MinValue;
                         for (var tick = 0; tick < 13; tick++)
                         {
                             var y = plot.Top + plot.Height * tick / 12f;
@@ -163,22 +162,10 @@ public class StableWindowLayoutTests
                                 (int)Math.Round(y) - 1, 4, 3);
                             Assert.True(DifferenceCount(image, withoutGrid, gridRegion) > 0,
                                 $"Missing actual stereo grid row {tick * -6} dB.");
-                            var labelRegion = Rectangle.FromLTRB(
-                                Math.Max(0, (int)Math.Floor(plot.Left -
-                                    Math.Max(48f * control.DeviceDpi / 96, textHeight * 3))),
-                                Math.Max(0, (int)Math.Floor(y - textHeight / 2)),
-                                Math.Max(0, (int)Math.Floor(plot.Left - 3)),
-                                Math.Min(image.Height, (int)Math.Ceiling(y + textHeight / 2)));
-                            var paintedText = DifferenceBounds(image, withoutText, labelRegion);
-                            var mustBeVisible = fontScale == 1 || tick == 0 || tick == 12;
-                            if (mustBeVisible)
-                                Assert.False(paintedText.IsEmpty,
-                                    $"Missing actual stereo label {tick * -6} dB at {width}x{height}/{fontScale}.");
-                            if (paintedText.IsEmpty) continue;
-                            Assert.True(paintedText.Top > lastTextBottom,
-                                $"Stereo text rows overlap at {tick * -6} dB.");
-                            lastTextBottom = paintedText.Bottom - 1;
                         }
+                        AssertStereoLabelRows(image, withoutText, plot, bodyFont, textHeight,
+                            control.DeviceDpi, originalText, control.BackColor, fontScale,
+                            $"{width}x{height}/{fontScale}");
                         foreach (var frequency in new double[]
                                      { 20, 30, 40, 60, 100, 200, 300, 400, 600, 1000, 2000, 3000, 4000, 6000, 10000, 20000 })
                         {
@@ -251,7 +238,9 @@ public class StableWindowLayoutTests
         foreach (var field in new[] { "_dbAxisLabelsLeft", "_dbAxisLabelsRight" })
         {
             var labels = Field<Label[]>(form, field);
-            Assert.True(labels[0].Visible, $"{mode}: full-scale endpoint omitted.");
+            Assert.True(labels[0].Visible, $"{mode}: full-scale endpoint omitted; viewport {advanced.Bounds}, " +
+                $"curve plot {advanced.SpectrumPlotBounds}, toolbar {panel.Bounds}, status {status.Bounds}, " +
+                $"endpoint size {labels[0].Size}.");
             Assert.True(labels[12].Visible, $"{mode}: display-floor endpoint omitted.");
         }
         Assert.True(frequencyLabels[0].Visible, $"{mode}: 20Hz endpoint omitted.");
@@ -316,9 +305,102 @@ public class StableWindowLayoutTests
         return maxX < 0 ? Rectangle.Empty : Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
     }
 
+    private static void AssertStereoLabelRows(Bitmap actual, Bitmap withoutText, RectangleF plot,
+        Font font, float textHeight, int dpi, Color ink, Color background, float fontScale, string context)
+    {
+        // Sampling a font-height window at every tick counts neighboring ink again when
+        // a tick is deliberately unlabeled. Read each actual raster row once instead;
+        // reference glyphs identify its location/height, never the renderer's stride.
+        var references = Enumerable.Range(0, 13).Select(tick =>
+        {
+            var y = plot.Top + plot.Height * tick / 12f - textHeight / 2;
+            return RasterizeLabel(tick, y, font, dpi, ink, background);
+        }).ToArray();
+        var scale = dpi / 96f;
+        var reserve = Math.Max(48 * scale, references.Max(reference => reference.Bounds.Width) + 6 * scale);
+        var gutter = Rectangle.FromLTRB(Math.Max(0, (int)Math.Floor(plot.Left - reserve)),
+            Math.Max(0, references.Min(reference => reference.Bounds.Top) - 1),
+            Math.Max(0, (int)Math.Floor(plot.Left - 3)),
+            Math.Min(actual.Height, references.Max(reference => reference.Bounds.Bottom) + 1));
+        var rows = PaintedRows(actual, withoutText, gutter);
+        var observed = new HashSet<int>();
+        var maximumSingleHeight = references.Max(reference => reference.Bounds.Height);
+        var previousBottom = int.MinValue;
+        foreach (var row in rows)
+        {
+            Assert.True(row.Top > previousBottom,
+                $"Stereo text rows have no blank separation at {context}: {row} after {previousBottom}.");
+            Assert.True(row.Height <= maximumSingleHeight + 1,
+                $"Stereo text ink merged/overlapped at {context}: row {row}, maximum single-label height {maximumSingleHeight}.");
+            var matches = references.Where(reference => Math.Abs(reference.Bounds.Top - row.Top) <= 1 &&
+                Math.Abs(reference.Bounds.Bottom - row.Bottom) <= 1).ToArray();
+            Assert.True(matches.Length == 1,
+                $"Stereo text row is clipped, merged or misaligned at {context}: actual {row}; matching reference ticks={matches.Length}.");
+            var match = matches[0];
+            Assert.True(row.Width >= match.Bounds.Width - 1,
+                $"Clipped stereo label {match.Tick * -6} dB at {context}: ink {row}, required width {match.Bounds.Width}.");
+            Assert.True(observed.Add(match.Tick), $"Stereo label {match.Tick * -6} dB was painted more than once at {context}.");
+            previousBottom = row.Bottom;
+        }
+        foreach (var required in references.Where(reference => fontScale == 1 || reference.Tick == 0 || reference.Tick == 12))
+        {
+            Assert.True(required.Bounds.Top >= 0 && required.Bounds.Bottom <= actual.Height,
+                $"Stereo label {required.Tick * -6} dB is clipped by the control at {context}.");
+            Assert.Contains(required.Tick, observed);
+        }
+    }
+
+    private sealed class LabelRasterReference
+    {
+        internal int Tick;
+        internal Rectangle Bounds;
+    }
+
+    private static LabelRasterReference RasterizeLabel(int tick, float y, Font font, int dpi, Color ink, Color background)
+    {
+        var margin = (int)Math.Ceiling(8 * dpi / 96d);
+        var text = SpectrumAxis.DecibelLabels[tick];
+        var size = TextRenderer.MeasureText(text, font);
+        using var label = new Bitmap(size.Width + margin * 2, Math.Max(size.Height, (int)Math.Ceiling(font.GetHeight(dpi))) + margin * 2,
+            PixelFormat.Format32bppPArgb);
+        label.SetResolution(dpi, dpi);
+        using var blank = new Bitmap(label.Width, label.Height, PixelFormat.Format32bppPArgb);
+        blank.SetResolution(dpi, dpi);
+        using (var graphics = Graphics.FromImage(blank)) graphics.Clear(background);
+        using (var graphics = Graphics.FromImage(label))
+        {
+            graphics.Clear(background);
+            graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            using var brush = new SolidBrush(ink);
+            graphics.DrawString(text, font, brush, margin, margin + y - (float)Math.Floor(y));
+        }
+        var bounds = DifferenceBounds(label, blank, new Rectangle(Point.Empty, label.Size));
+        Assert.False(bounds.IsEmpty, "Single-label reference raster must contain actual glyph ink.");
+        bounds.Y += (int)Math.Floor(y) - margin;
+        return new LabelRasterReference { Tick = tick, Bounds = bounds };
+    }
+
+    private static List<Rectangle> PaintedRows(Bitmap actual, Bitmap withoutText, Rectangle region)
+    {
+        region.Intersect(new Rectangle(Point.Empty, actual.Size));
+        var result = new List<Rectangle>(); var current = Rectangle.Empty;
+        for (var y = region.Top; y < region.Bottom; y++)
+        {
+            var row = DifferenceBounds(actual, withoutText, new Rectangle(region.Left, y, region.Width, 1));
+            if (row.IsEmpty)
+            {
+                if (!current.IsEmpty) { result.Add(current); current = Rectangle.Empty; }
+            }
+            else current = current.IsEmpty ? row : Rectangle.Union(current, row);
+        }
+        if (!current.IsEmpty) result.Add(current);
+        return result;
+    }
+
     private static Bitmap Paint(Control control)
     {
         var image = new Bitmap(control.Width, control.Height, PixelFormat.Format32bppPArgb);
+        image.SetResolution(control.DeviceDpi, control.DeviceDpi);
         using var graphics = Graphics.FromImage(image);
         using var args = new PaintEventArgs(graphics, control.ClientRectangle);
         control.GetType().GetMethod("OnPaint", PrivateInstance).Invoke(control, new object[] { args });

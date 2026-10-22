@@ -48,11 +48,16 @@ public class AuditCompletenessRegressionTests
             }
             var control = Field<AdvancedVisualizationControl>(form, "_advancedVisualizer");
             var bars = Field<VerticalProgressBar[]>(form, "_progressBars");
+            var sourceEpoch = new object();
+            long fixtureEndFrame = 0;
             foreach (var fixture in new[] { "silence", "quiet", "stereo" })
             {
                 var level = fixture == "silence" ? (byte)0 : fixture == "quiet" ? (byte)12 : (byte)190;
                 var frame = Enumerable.Repeat(level, 83).ToArray();
-                var audio = CreateAudio(fixture == "silence" ? 0f : fixture == "quiet" ? .0002f : .5f, 2, 48000);
+                // Each fixture is a new observed window, rather than three
+                // conflicting payloads labelled with the same source position.
+                fixtureEndFrame += 512;
+                var audio = CreateAudio(fixture == "silence" ? 0f : fixture == "quiet" ? .0002f : .5f, 2, 48000, fixtureEndFrame, sourceEpoch);
                 var inputLeft = (byte[])audio.LeftSpectrum.Clone();
                 var inputRight = (byte[])audio.RightSpectrum.Clone();
                 typeof(FormAudioSpectrum).GetMethod("Spectrum_Change", PrivateInstance).Invoke(form,
@@ -363,7 +368,7 @@ public class AuditCompletenessRegressionTests
                 var pixels = new List<int>();
                 for (var y = 0; y < image.Height; y += 8)
                 for (var x = 0; x < image.Width; x += 8) pixels.Add(image.GetPixel(x, y).ToArgb());
-                Assert.True(pixels.Distinct().Count() > 5, $"{preset} needs a visible illustrative rendering.");
+                Assert.True(pixels.Distinct().Count() > 5, $"{preset} needs a readable captured-snapshot or waiting-state preview.");
                 Assert.True(fingerprints.Add(string.Join(",", pixels)), $"{preset} must show its own combination.");
                 if (!string.IsNullOrWhiteSpace(evidenceDirectory))
                 {
@@ -554,7 +559,7 @@ public class AuditCompletenessRegressionTests
         }
     }
 
-    private static AudioVisualizationData CreateAudio(float amplitude, int channels, int sampleRate)
+    private static AudioVisualizationData CreateAudio(float amplitude, int channels, int sampleRate, long endFrame = 512, object sourceEpoch = null)
     {
         const int frames = 512;
         var samples = new float[frames * channels];
@@ -564,7 +569,7 @@ public class AuditCompletenessRegressionTests
             if (channels > 1) samples[frame * channels + 1] = samples[frame * channels] * .25f;
         }
         var data = new AudioVisualizationData();
-        data.Update(samples, frames, channels, sampleRate);
+        data.UpdateObservedWindow(samples, frames, channels, sampleRate, endFrame, Math.Max(0, endFrame - frames), 0, sourceEpoch);
         var power = amplitude * amplitude / 2d;
         data.SetSevenBandPower(Enumerable.Repeat(power, 7).ToArray());
         data.SetChannelSpectrum(Enumerable.Repeat(power, 83).ToArray(),

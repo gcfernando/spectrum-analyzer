@@ -13,6 +13,7 @@
     <FileAlignment>512</FileAlignment>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <ApplicationIcon>Ref_Files\Spectrum.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <StartupObject>Spectrum.Program</StartupObject>
     <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
     <!-- Optional: stable builds -->
@@ -101,6 +102,27 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="Analyzer.cs" />
+    <Compile Include="AnalysisAudioFile.cs" />
+    <Compile Include="AnalysisWorkspace.cs" />
+    <Compile Include="SharedPresentation.cs" />
+    <Compile Include="MainWorkspaceShell.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="MainSpectrumInspector.cs" />
+    <Compile Include="MainSpectrumHitTest.cs" />
+    <Compile Include="AnalysisSessionLibrary.cs" />
+    <Compile Include="SessionLibraryControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="VisualizationBrowser.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="VisualizationCatalogPreferences.cs" />
+    <Compile Include="AnalysisPlotControl.cs" />
+    <Compile Include="AnalysisWorkbenchForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Dsp\AnalysisMeasurements.cs" />
     <Compile Include="BarBallistics.cs" />
     <Compile Include="BarColorThemes.cs" />
     <Compile Include="CaptureGate.cs" />
@@ -198,8 +220,7 @@
     <Content Include="Ref_Files\Spectrum.ico" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <UsingTask TaskName="PrepareSpectrumRelease" TaskFactory="RoslynCodeTaskFactory"
-             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+  <UsingTask TaskName="PrepareSpectrumRelease" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
     <ParameterGroup>
       <OutputDirectory ParameterType="System.String" Required="true" />
       <OverviewFile ParameterType="System.String" Required="true" />
@@ -264,11 +285,7 @@
       ]]></Code>
     </Task>
   </UsingTask>
-  <Target Name="PrepareReleaseDistribution" AfterTargets="Build"
-          Condition="'$(Configuration)' == 'Release'">
-    <PrepareSpectrumRelease OutputDirectory="$(TargetDir)"
-                            OverviewFile="$(MSBuildProjectDirectory)\..\THIRD_PARTY_NOTICES.md"
-                            PackageNotices="@(SpectrumPackageNotice)"
-                            RetiredFiles="@(SpectrumRetiredReleaseFile)" />
+  <Target Name="PrepareReleaseDistribution" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <PrepareSpectrumRelease OutputDirectory="$(TargetDir)" OverviewFile="$(MSBuildProjectDirectory)\..\THIRD_PARTY_NOTICES.md" PackageNotices="@(SpectrumPackageNotice)" RetiredFiles="@(SpectrumRetiredReleaseFile)" />
   </Target>
 </Project>

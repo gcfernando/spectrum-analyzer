@@ -30,6 +30,11 @@ public sealed class Analyzer : IDisposable
 {
     public static event OnChangeHandler OnChange;
 
+    // Optional full-precision feed, used by the main inspector and analysis workspace.
+    // Samples are copied by AnalysisFrame on the analysis timer, never on WASAPI's callback.
+    internal event Action<AnalysisFrame> AnalysisFrameAvailable;
+    internal event Action AnalysisUnavailable;
+
     // Number of bars we output
     private const int LINES = 83;
 
@@ -100,6 +105,8 @@ public sealed class Analyzer : IDisposable
     private long _nextRecoveryTicks;
     private int _recoveryFailures;
     private Device _selectedDevice;
+    private volatile AnalysisAudioSource _requestedAnalysisSource;
+    private string _activeAnalysisSourceId;
     // Starts out as "Starting" so the UI has something to show before the first real status
     private volatile CaptureStatus _currentStatus = new(CaptureState.Starting, "Starting audio capture", null, null, null, 0, 0);
     private int _lastNativeLevel = -1;
@@ -114,6 +121,9 @@ public sealed class Analyzer : IDisposable
     public int LastNativeLevel => Volatile.Read(ref _lastNativeLevel);
 
     internal BandPlan CurrentBandPlan => _stream?.State.Engine.Plan;
+    internal AnalysisAudioSource SelectedAnalysisSource => _requestedAnalysisSource ?? AnalysisAudioSource.Default;
+    private string CaptureDescription => _requestedAnalysisSource != null && !_requestedAnalysisSource.IsLoopback
+        ? "Capturing audio input" : "Capturing system output";
 
     // Public ctor does real native audio setup; the internal one lets tests run managed-only without touching BASS
     public Analyzer() : this(true) { }
@@ -152,7 +162,8 @@ public sealed class Analyzer : IDisposable
         try
         {
             _mmEnumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator();
-            _deviceNotificationClient = new DeviceNotificationClient(OnAudioDeviceChanged, () => CurrentStatus);
+            _deviceNotificationClient = new DeviceNotificationClient(OnAudioDeviceChanged, () => CurrentStatus,
+                () => { if (_requestedAnalysisSource == null) OnAudioDeviceChanged(); });
             _ = _mmEnumerator.RegisterEndpointNotificationCallback(_deviceNotificationClient);
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Endpoint notifications unavailable: " + ex.Message); }
@@ -188,6 +199,53 @@ public sealed class Analyzer : IDisposable
         return (flags & required) == required;
     }
 
+    internal static bool IsEligibleAnalysisSource(BASSWASAPIDeviceInfo flags)
+    {
+        const BASSWASAPIDeviceInfo required = BASSWASAPIDeviceInfo.BASS_DEVICE_ENABLED |
+            BASSWASAPIDeviceInfo.BASS_DEVICE_INPUT;
+        return (flags & required) == required;
+    }
+
+    // Return endpoint IDs as the stable identity; native device indices can change after reconnection.
+    internal IReadOnlyList<AnalysisAudioSource> GetAnalysisSources()
+    {
+        var result = new List<AnalysisAudioSource> { AnalysisAudioSource.Default };
+        if (_managedOnly) return result;
+        lock (_nativeFreeGate)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Analyzer));
+            var count = BassWasapi.BASS_WASAPI_GetDeviceCount();
+            for (var index = 0; index < count; index++)
+            {
+                var info = BassWasapi.BASS_WASAPI_GetDeviceInfo(index);
+                if (info == null || !IsEligibleAnalysisSource(info.flags) || string.IsNullOrEmpty(info.id)) continue;
+                var loopback = (info.flags & BASSWASAPIDeviceInfo.BASS_DEVICE_LOOPBACK) != 0;
+                result.Add(new AnalysisAudioSource(info.id, info.name, false, loopback, index));
+            }
+        }
+        return result;
+    }
+
+    internal void SelectAnalysisSource(AnalysisAudioSource source)
+    {
+        source = source ?? AnalysisAudioSource.Default;
+        lock (_lifecycleGate)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Analyzer));
+            if (_stopped) throw new InvalidOperationException("Capture has stopped.");
+            var requested = source.IsDefault ? null : source;
+            var previous = _requestedAnalysisSource;
+            if (previous == null && requested == null || previous != null && requested != null &&
+                string.Equals(previous.Id, requested.Id, StringComparison.OrdinalIgnoreCase) && previous.IsLoopback == requested.IsLoopback)
+                return;
+            _requestedAnalysisSource = requested;
+            _endpointChangeVersion++;
+            // An explicit user selection is not delayed by a failed endpoint's retry backoff.
+            Interlocked.Exchange(ref _nextRecoveryTicks, 0);
+        }
+        if (!_managedOnly) RequestRecovery();
+    }
+
     // Prefer the loopback matching the Windows default output; with no default known just take the first one
     internal static Device SelectLoopback(IReadOnlyList<Device> devices, string defaultEndpointId)
         => string.IsNullOrEmpty(defaultEndpointId) ? devices.FirstOrDefault() :
@@ -198,14 +256,25 @@ public sealed class Analyzer : IDisposable
     {
         var count = BassWasapi.BASS_WASAPI_GetDeviceCount();
         var devices = new List<Device>(Math.Max(0, count));
+        var requested = _requestedAnalysisSource;
 
         for (var i = 0; i < count; i++)
         {
             var di = BassWasapi.BASS_WASAPI_GetDeviceInfo(i);
-            if (di != null && IsEligibleLoopback(di.flags))
+            if (di != null && (requested == null ? IsEligibleLoopback(di.flags) :
+                IsEligibleAnalysisSource(di.flags) &&
+                ((di.flags & BASSWASAPIDeviceInfo.BASS_DEVICE_LOOPBACK) != 0) == requested.IsLoopback))
             {
                 devices.Add(new Device { Index = i, DeviceName = di.name, DeviceId = di.id });
             }
+        }
+
+        if (requested != null)
+        {
+            _selectedDevice = devices.FirstOrDefault(device =>
+                string.Equals(device.DeviceId, requested.Id, StringComparison.OrdinalIgnoreCase));
+            SelectIndex = _selectedDevice?.Index ?? -1;
+            return;
         }
 
         string defaultId = null;
@@ -256,9 +325,11 @@ public sealed class Analyzer : IDisposable
         }
         DeviceList();
         var deviceInfo = SelectIndex < 0 ? null : BassWasapi.BASS_WASAPI_GetDeviceInfo(SelectIndex);
-        if (deviceInfo == null || !IsEligibleLoopback(deviceInfo.flags))
+        if (deviceInfo == null || !(_requestedAnalysisSource == null
+                ? IsEligibleLoopback(deviceInfo.flags) : IsEligibleAnalysisSource(deviceInfo.flags)))
         {
-            CaptureFailed("No enabled system-output loopback endpoint is available");
+            CaptureFailed(_requestedAnalysisSource == null ? "No enabled system-output loopback endpoint is available" :
+                "The selected capture endpoint is unavailable. Select another source or follow the default output.");
             return;
         }
         // AUTOFORMAT lets WASAPI use the device's mix format; we read the real rate back afterwards
@@ -289,9 +360,11 @@ public sealed class Analyzer : IDisposable
 
         // Reuse the existing state when format is unchanged so history/continuity survives a reconnect
         var state = _stream?.State;
-        if (state == null || state.SampleRate != _sampleRate || state.History.Channels != channels)
+        if (state == null || state.SampleRate != _sampleRate || state.History.Channels != channels ||
+            !string.Equals(_activeAnalysisSourceId, _selectedDevice?.DeviceId, StringComparison.OrdinalIgnoreCase))
             state = AnalysisState.Create(_sampleRate, channels);
         _stream = new CaptureStream(state);
+        _activeAnalysisSourceId = _selectedDevice?.DeviceId;
 
         if (!BassWasapi.BASS_WASAPI_Start())
         {
@@ -464,6 +537,7 @@ public sealed class Analyzer : IDisposable
         var frames = state.Engine.RequiredFrames;
         if (validCaptureLevel && state.History.TryCopyLatest(state.Snapshot, frames, out var endFrame, _gate.GapEndFrame))
         {
+            AnalysisFrame.ValidatePcm(state.Snapshot, frames, state.History.Channels);
             _audioData.UpdateObservedWindow(state.Snapshot, frames, state.History.Channels, state.SampleRate,
                 endFrame, state.AudioEndFrame, _gate.GapEndFrame, stream);
             // The native level is only a gate hint. The FFT window can still contain a
@@ -472,20 +546,26 @@ public sealed class Analyzer : IDisposable
                 PopulateAnalyzedSpectrum(state, frames);
             else
             {
+                Array.Clear(_bandPower, 0, LINES);
                 Array.Clear(_leftBandPower, 0, LINES);
                 Array.Clear(_rightBandPower, 0, LINES);
                 _audioData.SetChannelSpectrum(_leftBandPower, _rightBandPower);
                 if (Volatile.Read(ref _sevenBandEnabled) != 0)
                     _audioData.SetSevenBandPower(null);
             }
+            if (_audioData.HasSamples) PublishAnalysisFrame(state, frames, endFrame, stream);
+            else NotifyAnalysisUnavailable();
             state.AudioEndFrame = endFrame;
         }
         else
+        {
             _audioData.SetUnavailableWindow(state.History.TotalFrames, state.History.Channels, state.SampleRate, stream);
+            NotifyAnalysisUnavailable();
+        }
         // Distinguish real digital silence from "we have no PCM at all"
         var measuredSilence = _audioData.HasSamples && _audioData.LeftPeak == 0 && _audioData.RightPeak == 0;
         SetStatus(!_audioData.HasSamples ? CaptureState.Unavailable : measuredSilence ? CaptureState.Silent : CaptureState.Capturing,
-            !_audioData.HasSamples ? "No current captured PCM" : measuredSilence ? "Captured digital silence" : "Capturing system output");
+            !_audioData.HasSamples ? "No current captured PCM" : measuredSilence ? "Captured digital silence" : CaptureDescription);
         _fireEventArgs.Plan = state.Engine.Plan;
         FireOnChange();
     }
@@ -496,16 +576,20 @@ public sealed class Analyzer : IDisposable
         var frames = state.Engine.RequiredFrames;
         if (!state.History.TryCopyLatest(state.Snapshot, frames, out var endFrame, _gate.GapEndFrame))
         {
+            NotifyAnalysisUnavailable();
             return;
         }
 
+        AnalysisFrame.ValidatePcm(state.Snapshot, frames, state.History.Channels);
         _audioData.UpdateObservedWindow(state.Snapshot, frames, state.History.Channels, state.SampleRate,
             endFrame, state.AudioEndFrame, _gate.GapEndFrame, stream);
         PopulateAnalyzedSpectrum(state, frames);
+        if (_audioData.HasSamples) PublishAnalysisFrame(state, frames, endFrame, stream);
+        else NotifyAnalysisUnavailable();
         state.AudioEndFrame = endFrame;
         _fireEventArgs.Plan = state.Engine.Plan;
         SetStatus(_audioData.HasSamples ? CaptureState.Capturing : CaptureState.Unavailable,
-            _audioData.HasSamples ? "Capturing system output" : "Waiting for captured PCM");
+            _audioData.HasSamples ? CaptureDescription : "Waiting for captured PCM");
         FireOnChange();
     }
 
@@ -535,6 +619,31 @@ public sealed class Analyzer : IDisposable
         for (var i = 0; i < LINES; i++)
         {
             _spectrumData[i] = LevelScale.ToDisplayByte(LevelScale.PowerToDb(_bandPower[i]));
+        }
+    }
+
+    private void PublishAnalysisFrame(AnalysisState state, int frames, long endFrame, CaptureStream stream)
+    {
+        var handlers = AnalysisFrameAvailable;
+        if (handlers == null) return;
+        var frame = new AnalysisFrame(state.Engine.Plan, state.History.Channels, frames, endFrame,
+            state.Snapshot, _bandPower, _leftBandPower, _rightBandPower, stream, Math.Max(stream.StartFrame, _gate.GapEndFrame),
+            _selectedDevice?.DeviceId, _selectedDevice?.DeviceName);
+        foreach (Action<AnalysisFrame> handler in handlers.GetInvocationList())
+        {
+            try { handler(frame); }
+            catch (Exception exception) { System.Diagnostics.Debug.WriteLine("Analysis subscriber failed: " + exception); }
+        }
+    }
+
+    private void NotifyAnalysisUnavailable()
+    {
+        var handlers = AnalysisUnavailable;
+        if (handlers == null) return;
+        foreach (Action handler in handlers.GetInvocationList())
+        {
+            try { handler(); }
+            catch (Exception exception) { System.Diagnostics.Debug.WriteLine("Analysis availability subscriber failed: " + exception); }
         }
     }
 
@@ -586,7 +695,8 @@ public sealed class Analyzer : IDisposable
                         lock (_lifecycleGate)
                             endpointVersion = _endpointChangeVersion;
                         FreeNativeHandles();
-                        SetStatus(CaptureState.Recovering, "Reconnecting system-output loopback");
+                        SetStatus(CaptureState.Recovering, _requestedAnalysisSource == null ?
+                            "Reconnecting system-output loopback" : "Reconnecting selected audio endpoint");
                         PublishUnavailable();
                         Interlocked.Exchange(ref _nextRecoveryTicks, DateTime.UtcNow.AddSeconds(1).Ticks);
                         InitializeCapture();
@@ -725,6 +835,9 @@ public sealed class Analyzer : IDisposable
             finally
             {
                 SetStatus(CaptureState.Stopped, "Capture disposed");
+                NotifyAnalysisUnavailable();
+                AnalysisFrameAvailable = null;
+                AnalysisUnavailable = null;
                 StatusChanged = null;
             }
         }
@@ -792,6 +905,7 @@ public sealed class Analyzer : IDisposable
     // Flatline the bars and mark the audio window unavailable so the UI doesn't show stale data
     private void PublishUnavailable()
     {
+        NotifyAnalysisUnavailable();
         Array.Clear(_spectrumData, 0, LINES);
         var stream = _stream;
         _audioData.SetUnavailableWindow(stream.State.History.TotalFrames, stream.State.History.Channels, stream.State.SampleRate, stream);
@@ -867,12 +981,17 @@ public sealed class Analyzer : IDisposable
     private sealed class DeviceNotificationClient : NAudio.CoreAudioApi.Interfaces.IMMNotificationClient
     {
         private readonly Action _onDefaultChanged;
+        private readonly Action _onDefaultEndpointChanged;
         private readonly Func<CaptureStatus> _currentStatus;
 
         public DeviceNotificationClient(Action onDefaultChanged, Func<CaptureStatus> currentStatus)
+            : this(onDefaultChanged, currentStatus, onDefaultChanged) { }
+
+        public DeviceNotificationClient(Action onDefaultChanged, Func<CaptureStatus> currentStatus, Action onDefaultEndpointChanged)
         {
             _onDefaultChanged = onDefaultChanged;
             _currentStatus = currentStatus;
+            _onDefaultEndpointChanged = onDefaultEndpointChanged;
         }
 
         public void OnDefaultDeviceChanged(
@@ -884,7 +1003,7 @@ public sealed class Analyzer : IDisposable
             if (flow == NAudio.CoreAudioApi.DataFlow.Render &&
                 role == NAudio.CoreAudioApi.Role.Multimedia)
             {
-                _onDefaultChanged();
+                _onDefaultEndpointChanged();
             }
         }
 

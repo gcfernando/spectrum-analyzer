@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Windows.Forms;
 
 // Compile with the .NET Framework C# compiler /platform:x86. No execution-policy changes are needed.
 internal static class RuntimeAuditRunner
@@ -14,8 +15,11 @@ internal static class RuntimeAuditRunner
     {
         try
         {
+            // Shown-form helpers must register native controls with the same
+            // visual-style startup as Program.Main, before loading the test UI.
+            Application.EnableVisualStyles();
             if (args.Length < 4)
-                throw new ArgumentException("Usage: RuntimeAuditRunner.exe <test-dll|packaged-exe> <Capture|Desktop|Package> <seconds> <output-directory> [quiet-signal]");
+                throw new ArgumentException("Usage: RuntimeAuditRunner.exe <test-dll|packaged-exe> <Capture|Desktop|Package|AnalysisUpgrade|WorkbenchDialogs|SessionLibrary|WorkspacePerformance|NativeWorkspace|Navigation> <seconds> <output-directory> [quiet-signal]");
             var assemblyPath = Path.GetFullPath(args[0]);
             var assemblyDirectory = Path.GetDirectoryName(assemblyPath);
             var output = Path.GetFullPath(args[3]);
@@ -37,6 +41,26 @@ internal static class RuntimeAuditRunner
                 return Assembly.LoadFrom(File.Exists(local) ? local : Path.Combine(applicationDirectory, name + ".dll"));
             };
             var assembly = Assembly.LoadFrom(assemblyPath);
+            if (string.Equals(args[1], "AnalysisUpgrade", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(args[1], "WorkbenchDialogs", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(args[1], "SessionLibrary", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(args[1], "WorkspacePerformance", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(args[1], "NativeWorkspace", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(args[1], "Navigation", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(args[1], "RolesTruth", StringComparison.OrdinalIgnoreCase))
+            {
+                var dialogs = string.Equals(args[1], "WorkbenchDialogs", StringComparison.OrdinalIgnoreCase);
+                var helper = string.Equals(args[1], "RolesTruth", StringComparison.OrdinalIgnoreCase) ? "RolesTruthVerification"
+                    : dialogs ? "NativeWorkbenchDialogVerification" : args[1] == "SessionLibrary" ? "SessionLibraryVerification"
+                    : args[1] == "WorkspacePerformance" ? "MainWorkspacePerformanceVerification"
+                    : args[1] == "NativeWorkspace" ? "MainNativeWindowVerification"
+                    : string.Equals(args[1], "Navigation", StringComparison.OrdinalIgnoreCase) ? "AnalysisNavigationVerification" : "AnalysisUpgradeVerification";
+                var proof = assembly.GetType("Spectrum.Tests." + helper, true);
+                var result = (string)proof.GetMethod("Run", BindingFlags.Public | BindingFlags.Static).Invoke(null, new object[] { output });
+                File.WriteAllText(Path.Combine(output, helper + ".json"), result);
+                Console.WriteLine("Completed " + helper + ". Evidence: " + output);
+                return 0;
+            }
             var capture = string.Equals(args[1], "Capture", StringComparison.OrdinalIgnoreCase);
             if (!capture && !string.Equals(args[1], "Desktop", StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException("Kind must be Capture or Desktop.");
@@ -52,7 +76,7 @@ internal static class RuntimeAuditRunner
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine(exception.GetBaseException().Message);
+            Console.Error.WriteLine(exception.GetBaseException().ToString());
             return 1;
         }
     }

@@ -201,7 +201,9 @@ public class Ambiance_ThemeContainer : ContainerControl
     protected override void OnInvalidated(System.Windows.Forms.InvalidateEventArgs e)
     {
         base.OnInvalidated(e);
-        ParentForm?.Text = Text;
+        // A custom header may hide this painted caption while retaining a native
+        // window identity for the task switcher and accessibility clients.
+        if (!string.IsNullOrEmpty(Text)) ParentForm?.Text = Text;
     }
 
     protected override void OnPaintBackground(PaintEventArgs e) => base.OnPaintBackground(e);
@@ -513,7 +515,7 @@ public class Ambiance_ControlBox : Control
                 _maximizeButton.Left = 22;
                 _closeButton.Left = value ? 44 : 22;
             }
-            Size = field ? new Size(64, 22) : new Size(44, 22);
+            Size = ChromeSize;
             Invalidate();
         }
     } = true;
@@ -625,8 +627,10 @@ public class Ambiance_ControlBox : Control
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
-        Size = EnableMaximize ? new Size(64, 22) : new Size(44, 22);
     }
+
+    private Size ChromeSize => new Size((int)Math.Round((EnableMaximize ? 64 : 44) * DeviceDpi / 96d),
+        (int)Math.Round(22 * DeviceDpi / 96d));
 
     protected override void OnCreateControl()
     {

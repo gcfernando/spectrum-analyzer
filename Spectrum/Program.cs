@@ -11,6 +11,7 @@ namespace Spectrum
         [STAThread]
         private static void Main()
         {
+            Application.EnableVisualStyles();
             // Named mutex is how we spot a second copy already running
             bool createdNew;
             using var mutex = new Mutex(true, "Spectrum_SingleInstance_Mutex", out createdNew);

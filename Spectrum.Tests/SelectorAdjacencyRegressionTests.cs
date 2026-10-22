@@ -113,7 +113,8 @@ public class SelectorAdjacencyRegressionTests
     {
         var panel = Field<FlowLayoutPanel>(form, "_selectionPanel");
         var fields = new[] { "_modeSelector", "_styleSelector", "_themeSelector" };
-        var keys = new[] { 'm', 'e', 'p' };
+        // Approved toolbar labels are View, Style and Palette; retain real mnemonic/focus checks.
+        var keys = new[] { 'v', 's', 'p' };
         for (var index = 0; index < fields.Length; index++)
         {
             var label = Field<Label>(form, fields[index] + "Label");

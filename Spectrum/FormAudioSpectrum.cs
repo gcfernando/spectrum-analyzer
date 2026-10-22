@@ -1,4 +1,4 @@
-﻿// Developer :: > Gehan Fernando
+// Developer :: > Gehan Fernando
 using System;
 using System.Configuration;
 using System.Collections.Generic;
@@ -8,6 +8,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using Spectrum.Dsp;
@@ -141,11 +142,20 @@ public partial class FormAudioSpectrum : Form
     private readonly object _updateLock = new();
 
     private Analyzer _analyzer;
+    private AnalysisWorkspace _analysisWorkspace;
+    private AnalysisWorkbenchForm _analysisWorkbench;
     private volatile bool _isDisposed;
 
     public FormAudioSpectrum()
     {
         InitializeComponent();
+        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoScaleDimensions = new SizeF(96, 96);
+        Icon = Properties.Resources.Spectrum;
+        MaximizeBox = true;
+        ambiance_ControlBox.EnableMaximize = true;
+        // The shell owns caption geometry; a second right-anchor transform during DPI scaling moves it twice.
+        ambiance_ControlBox.Anchor = AnchorStyles.Top | AnchorStyles.Left;
         KeyUp -= FormAudioSpectrum_KeyUp;
         ambiance_ThemeSpectrum.Sizable = true;
 
@@ -160,17 +170,22 @@ public partial class FormAudioSpectrum : Form
 
         UpdateStyles();
         InitializeSelectionControls();
+        InitializeWorkspaceShell();
     }
 
     // Handle commands before a focused native ComboBox can perform letter navigation.
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
+        if (keyData >= (Keys.Control | Keys.D1) && keyData <= (Keys.Control | Keys.D4))
+        { NavigateWorkspace(new[] { "Visualize", "Analyze", "Compare", "Sessions" }[(int)(keyData & Keys.KeyCode) - (int)Keys.D1]); return true; }
+        if (keyData == (Keys.Control | Keys.K)) { ShowModeSearch(); return true; }
         if (keyData == (Keys.Control | Keys.M)) { SelectNextItem(_modeSelector); return true; }
         if (keyData == (Keys.Control | Keys.T)) { SelectNextItem(_themeSelector); return true; }
         if (keyData == (Keys.Control | Keys.R)) { ShowRotationSettings(); return true; }
         if (keyData == (Keys.Control | Keys.G)) { ToggleGuides(); return true; }
         if (keyData == (Keys.Control | Keys.Space)) { SetDisplayFrozen(!_displayFrozen); return true; }
         if (keyData == (Keys.Control | Keys.S)) { SaveVisualizationImage(); return true; }
+        if (keyData == (Keys.Control | Keys.Shift | Keys.A)) { ShowAnalysisWorkbench(); return true; }
         if (keyData == Keys.F12) { TogglePin(); return true; }
         return base.ProcessCmdKey(ref msg, keyData);
     }
@@ -208,6 +223,17 @@ public partial class FormAudioSpectrum : Form
 
     private void FormAudioSpectrum_Load(object sender, EventArgs e)
     {
+        // Selector handles are created before Load. Apply the initial logical window size once
+        // if early handle creation has already advanced WinForms' DPI baseline without resizing it.
+        if (DeviceDpi != 96 && ClientSize == new Size(1200, 480))
+        {
+            var workArea = Screen.FromControl(this).WorkingArea;
+            if (MinimumSize == new Size(900, 250))
+                MinimumSize = new Size(Math.Min(workArea.Width, (int)Math.Round(900 * DeviceDpi / 96d)),
+                    Math.Min(workArea.Height, (int)Math.Round(250 * DeviceDpi / 96d)));
+            ClientSize = new Size(Math.Min(workArea.Width, (int)Math.Round(1200 * DeviceDpi / 96d)),
+                Math.Min(workArea.Height, (int)Math.Round(480 * DeviceDpi / 96d)));
+        }
         LoadVisualPreferences(out var configuredMode, out var configuredStyle, out var configuredTheme);
         ResolveConfiguredVisualState(configuredMode, configuredStyle, out _visualMode, out _visualStyle);
         _barTheme = ResolveConfiguredTheme(configuredTheme);
@@ -229,6 +255,9 @@ public partial class FormAudioSpectrum : Form
         UpdateStyleSelector();
 
         InitializeBarsOptimized(_visualMode);
+        foreach (var bar in _progressBars) AttachBarInspection(bar);
+        _advancedVisualizer.MouseMove += InspectAdvancedSpectrum;
+        _advancedVisualizer.MouseDown += (sender, args) => { InspectAdvancedSpectrum(sender, args); _mainInspection.Focus(); };
         UpdateRotationSettingsButton();
         ConfigureRotationTimer();
         CenterToScreen();
@@ -241,6 +270,9 @@ public partial class FormAudioSpectrum : Form
             SevenBandEnabled = string.Equals(_visualMode, AdvancedSpectralBalanceMode, StringComparison.OrdinalIgnoreCase)
         };
         Analyzer.OnChange += Spectrum_Change;
+        EnsureAnalysisWorkspace();
+        _analyzer.AnalysisFrameAvailable += ReceiveAnalysisFrame;
+        _analyzer.AnalysisUnavailable += ReceiveAnalysisUnavailable;
         UpdateCaptureStatus();
         _captureStatusTimer = new System.Windows.Forms.Timer { Interval = 250 };
         _captureStatusTimer.Tick += (sender, args) => UpdateCaptureStatus();
@@ -294,15 +326,15 @@ public partial class FormAudioSpectrum : Form
             ? $" | {status.SampleRate:N0} Hz / {status.Channels} ch"
             : string.Empty;
         var error = status.ErrorCode.HasValue ? $" (error {status.ErrorCode.Value})" : string.Empty;
-        var details = $"{status.State} | WASAPI loopback | {source}{format} | {status.Message}{error}";
+        var captureKind = _analyzer.SelectedAnalysisSource.IsLoopback ? "WASAPI loopback" : "WASAPI input";
+        var details = $"{status.State} | {captureKind} | {source}{format} | {status.Message}{error}";
         var text = string.IsNullOrEmpty(_effectFallbackMessage)
             ? $"{(_displayFrozen ? "Display frozen \u00B7 " : string.Empty)}{status.State} \u00B7 {source}{format}"
             : _effectFallbackMessage + $" | Capture: {status.State}";
-        if (_captureStatusLabel.Text == text && _captureStatusLabel.AccessibleDescription == details)
-            return;
         _captureStatusLabel.Text = text;
         _captureStatusLabel.AccessibleDescription = details;
         _selectionToolTip.SetToolTip(_captureStatusLabel, details);
+        RefreshCaptureBanner();
     }
 
     private void InitializeSelectionControls()
@@ -608,7 +640,7 @@ public partial class FormAudioSpectrum : Form
     internal Form CreatePresetBrowser()
     {
         var ui = CurrentTheme().Ui;
-        var dialog = new Form { Text = "Preview a preset", Name = "presetBrowser", StartPosition = FormStartPosition.CenterParent,
+        var dialog = new Form { Text = "Preview a preset", Name = "presetBrowser", Icon = Properties.Resources.Spectrum, StartPosition = FormStartPosition.CenterParent,
             ClientSize = new Size(860, 510), MinimumSize = new Size(640, 430), MinimizeBox = false, MaximizeBox = false,
             ShowInTaskbar = false, Font = ambiance_ThemeSpectrum.Font, AutoScaleMode = AutoScaleMode.Font,
             BackColor = ui.Surface, ForeColor = ui.PrimaryText };
@@ -617,10 +649,10 @@ public partial class FormAudioSpectrum : Form
         list.Items.AddRange(PresetNames);
         var details = new Label { Name = "presetDetails", AccessibleName = "Preset purpose and combination", Dock = DockStyle.Top,
             Height = 76, Padding = new Padding(8), ForeColor = ui.PrimaryText };
-        var notice = new Label { Name = "previewNotice", Text = "Illustrative preview - deterministic sample data, not live audio. Applying a preset changes presentation only.",
-            AccessibleName = "Preview uses illustrative sample data", Dock = DockStyle.Bottom, Height = 42,
+        var notice = new Label { Name = "previewNotice", Text = "Captured snapshot, not live audio. Without a measured window, the preview waits for audio. Applying a preset changes presentation only.",
+            AccessibleName = "Preview uses a captured snapshot, or waits for audio", Dock = DockStyle.Bottom, Height = 42,
             Padding = new Padding(8), ForeColor = ui.SecondaryText };
-        var preview = new PictureBox { Name = "presetPreview", AccessibleName = "Illustrative preset rendering", Dock = DockStyle.Fill,
+        var preview = new PictureBox { Name = "presetPreview", AccessibleName = "Captured audio snapshot preview, or waiting for audio", Dock = DockStyle.Fill,
             SizeMode = PictureBoxSizeMode.Zoom, BackColor = ui.VisualizationSurface };
         var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8) };
         body.Controls.Add(preview); body.Controls.Add(details); body.Controls.Add(notice);
@@ -656,54 +688,63 @@ public partial class FormAudioSpectrum : Form
     }
 
     internal Bitmap RenderPresetPreview(string name, Size size)
+        => RenderPreviewCore(name, size, null);
+
+    internal Bitmap RenderModePreview(string mode, Size size)
+    {
+        if (Array.IndexOf(s_visualModes, mode) < 0) throw new ArgumentException("Unknown visualization.", nameof(mode));
+        return RenderPreviewCore("Mode preview", size, new VisualSelection(mode, "None", _barTheme));
+    }
+
+    private Bitmap RenderPreviewCore(string name, Size size, VisualSelection? requested)
     {
         if (size.Width < 160 || size.Height < 100) throw new ArgumentOutOfRangeException(nameof(size));
-        var selection = GetPresetSelection(name);
+        var selection = requested ?? GetPresetSelection(name);
         var theme = BarColorThemes.ApplyAppearance(BarColorThemes.Resolve(selection.Theme), _appearance);
         var image = new Bitmap(size.Width, size.Height);
-        var levels = new byte[BAR_COUNT];
-        var leftPower = new double[BAR_COUNT];
-        var rightPower = new double[BAR_COUNT];
-        for (var band = 0; band < BAR_COUNT; band++)
-        {
-            var db = -42 + 21 * Math.Sin(band * .065) + 9 * Math.Sin(band * .29);
-            levels[band] = LevelScale.ToDisplayByte(db);
-            leftPower[band] = .5 * Math.Pow(10, db / 10);
-            rightPower[band] = .5 * Math.Pow(10, (db - 5 + 7 * Math.Sin(band * .11)) / 10);
-        }
+        // Browsing never creates samples or measurements. This is a static copy of
+        // the exact audio window already applied to the main display, or an empty
+        // state. Source changes after this call cannot relabel it as live audio.
+        var frame = _displayedInspection?.Frame;
+        var measured = frame != null && frame.EndFrame > frame.FirstValidFrame && _audioApplyBuffer.HasSamples &&
+            frame.EndFrame == _audioApplyBuffer.EndFrame && frame.SampleRate == _audioApplyBuffer.SampleRate &&
+            frame.Channels == _audioApplyBuffer.Channels && ReferenceEquals(frame.SourceEpoch, _audioApplyBuffer.SourceEpoch);
+        var levels = measured ? (byte[])_applyBuffer.Clone() : null;
+        var needsPreviousWindow = selection.Mode == "Level Change";
+        var contentSize = new Size(size.Width, Math.Max(1, size.Height - 52));
         var guides = name != "Retro Bricks" && name != "Ambient Radial";
         try
         {
-            if (IsAdvancedMode(selection.Mode))
+            using (var background = Graphics.FromImage(image)) background.Clear(theme.Ui.VisualizationSurface);
+            if (!measured || needsPreviousWindow)
             {
+                using var graphics = Graphics.FromImage(image);
+                var message = needsPreviousWindow && measured
+                    ? "Two captured frames required\r\nChange preview unavailable"
+                    : "Waiting for audio\r\nNo measurement preview";
+                TextRenderer.DrawText(graphics, message, Font,
+                    new Rectangle(12, 8, contentSize.Width - 24, contentSize.Height - 16), theme.Ui.SecondaryText,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+            }
+            else if (IsAdvancedMode(selection.Mode))
+            {
+                // A single real window is rendered once. In particular, do not
+                // repeat it to invent a waterfall or a level-history timeline.
                 var audio = new AudioVisualizationData();
-                var samples = new float[1024];
-                for (var frame = 0; frame < 512; frame++)
-                {
-                    samples[frame * 2] = (float)(.43 * Math.Sin(frame * Math.PI / 24));
-                    samples[frame * 2 + 1] = (float)(.31 * Math.Sin(frame * Math.PI / 19));
-                }
-                audio.Update(samples, 512, 2, 48000);
-                audio.SetChannelSpectrum(leftPower, rightPower);
-                audio.SetSevenBandPower(new[] { .005, .025, .06, .018, .009, .003, .0006 });
-                using var control = new AdvancedVisualizationControl { Size = size, Mode = ResolveAdvancedMode(selection.Mode),
+                audio.CopyFrom(_audioApplyBuffer);
+                using var control = new AdvancedVisualizationControl { Size = contentSize, Mode = ResolveAdvancedMode(selection.Mode),
                     Style = VisualStyles.Parse(selection.Style), ShowGuides = guides };
                 control.ApplyTheme(theme);
+                control.SetBandPlan(frame.Plan);
                 control.SetAudioData(audio);
-                for (var frame = 0; frame < (name == "History" ? 48 : 2); frame++)
-                {
-                    for (var band = 0; band < BAR_COUNT; band++)
-                        levels[band] = LevelScale.ToDisplayByte(-42 + 21 * Math.Sin(band * .065 + frame * .09) + 9 * Math.Sin(band * .29));
-                    control.SetSpectrum(levels);
-                }
+                control.SetSpectrum(levels);
                 control.SettlePreviewBallistics();
                 control.DisplayFrozen = true;
-                control.DrawToBitmap(image, new Rectangle(Point.Empty, size));
+                control.DrawToBitmap(image, new Rectangle(Point.Empty, contentSize));
             }
             else
             {
-                using (var backgroundGraphics = Graphics.FromImage(image)) backgroundGraphics.Clear(theme.Ui.VisualizationSurface);
-                var plotHeight = size.Height - 34;
+                var plotHeight = contentSize.Height - 34;
                 for (var band = 0; band < BAR_COUNT; band++)
                 {
                     var x = 8 + band * (size.Width - 16) / BAR_COUNT;
@@ -729,10 +770,20 @@ public partial class FormAudioSpectrum : Form
                     var center = 8 + (int)Math.Round((size.Width - 16) * SpectrumAxis.Position(frequency));
                     var x = Math.Max(0, Math.Min(size.Width - labelWidth, center - labelWidth / 2));
                     if (x < previousRight + 4 || frequency < 20000 && x + labelWidth + 4 > size.Width - endWidth) continue;
-                    TextRenderer.DrawText(graphics, label, Font, new Rectangle(x, size.Height - 26, labelWidth, 24),
+                    TextRenderer.DrawText(graphics, label, Font, new Rectangle(x, contentSize.Height - 26, labelWidth, 24),
                         theme.Ui.SecondaryText, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
                     previousRight = x + labelWidth;
                 }
+            }
+            using (var graphics = Graphics.FromImage(image))
+            {
+                var provenance = needsPreviousWindow && measured ? "Change unavailable · one captured snapshot has no previous frame"
+                    : measured
+                    ? $"Captured snapshot · {frame.CapturedUtc:yyyy-MM-dd HH:mm:ss.fff} UTC · {frame.SampleRate:N0} Hz / {frame.Channels} ch · sample end {frame.EndFrame} · {frame.SourceName} · {frame.SourceId}"
+                    : "Waiting for audio · no captured measurement";
+                TextRenderer.DrawText(graphics, selection.Mode + " · " + selection.Theme + "\r\n" + provenance, Font,
+                    new Rectangle(8, contentSize.Height, size.Width - 16, 52), theme.Ui.SecondaryText,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.EndEllipsis);
             }
             return image;
         }
@@ -802,6 +853,8 @@ public partial class FormAudioSpectrum : Form
     private ContextMenuStrip CreateViewMenu()
     {
         var menu = new ContextMenuStrip { Font = ambiance_ThemeSpectrum.Font, ShowImageMargin = false };
+        menu.Items.Add("Analysis Workbench\u2026  Ctrl+Shift+A", null, (sender, args) => ShowAnalysisWorkbench());
+        menu.Items.Add(new ToolStripSeparator());
         var browse = new ToolStripMenuItem("Browse modes by purpose");
         foreach (var group in new[] { "Analyze", "Stereo and waveform", "History and change", "Inspect and monitor", "Creative" })
         {
@@ -907,6 +960,35 @@ public partial class FormAudioSpectrum : Form
         return menu;
     }
 
+    internal void ShowAnalysisWorkbench()
+    {
+        if (_isDisposed || _analyzer == null) return;
+        EnsureWorkbench();
+        if (!_analysisWorkbench.TopLevel)
+        {
+            _analysisWorkbench.Hide(); _workspaceHost.Controls.Remove(_analysisWorkbench);
+            _analysisWorkbench.Dock = DockStyle.None;
+            _analysisWorkbench.TopLevel = true;
+            _analysisWorkbench.FormBorderStyle = FormBorderStyle.Sizable;
+            _analysisWorkbench.SetEmbedded(false);
+            _analysisWorkbench.Size = new Size(_analysisWorkspace.WindowWidth, _analysisWorkspace.WindowHeight);
+            NavigateWorkspace("Visualize");
+        }
+        if (_analysisWorkbench.WindowState == FormWindowState.Minimized) _analysisWorkbench.WindowState = FormWindowState.Normal;
+        _analysisWorkbench.Show(this); _analysisWorkbench.Activate();
+    }
+
+    private void ReceiveAnalysisFrame(AnalysisFrame frame)
+    {
+        lock (_updateLock) _pendingInspectionFrame = frame;
+        // Main visualization needs raw band inspection; expensive workspace meters are bounded when hidden.
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_workspaceView != "Visualize" || _analysisWorkbench?.Visible == true ||
+            now - Interlocked.Read(ref _lastWorkspacePost) >= System.Diagnostics.Stopwatch.Frequency / 10)
+        { Interlocked.Exchange(ref _lastWorkspacePost, now); _analysisWorkspace?.Post(frame); }
+    }
+    private void ReceiveAnalysisUnavailable() => _analysisWorkspace?.PostUnavailable(_analyzer?.CurrentStatus.Message ?? "Audio unavailable");
+
     internal void SetAppearance(string appearance)
     {
         _appearance = VisualPreferenceSnapshot.ResolveAppearance(appearance);
@@ -944,54 +1026,8 @@ public partial class FormAudioSpectrum : Form
 
     private void ShowModeSearch()
     {
-        using var dialog = new Form { Text = "Find a visualization", StartPosition = FormStartPosition.CenterParent,
-            ClientSize = new Size(460, 390), MinimizeBox = false, MaximizeBox = false,
-            FormBorderStyle = FormBorderStyle.FixedDialog, Font = ambiance_ThemeSpectrum.Font, AutoScaleMode = AutoScaleMode.Font };
-        var ui = CurrentTheme().Ui;
-        dialog.BackColor = ui.Surface;
-        dialog.ForeColor = ui.PrimaryText;
-        var search = new TextBox { AccessibleName = "Search modes", Dock = DockStyle.Top, Margin = new Padding(10) };
-        var list = new ListBox { AccessibleName = "Matching visualizations", Dock = DockStyle.Fill,
-            BackColor = ui.ControlSurface, ForeColor = ui.PrimaryText, IntegralHeight = false };
-        var choose = new Button { Text = "Open view", AutoSize = true, Height = 32, DialogResult = DialogResult.OK,
-            FlatStyle = FlatStyle.Flat, BackColor = ui.ControlSurface, ForeColor = ui.PrimaryText };
-        var cancel = new Button { Text = "Cancel", AutoSize = true, Height = 32, DialogResult = DialogResult.Cancel,
-            FlatStyle = FlatStyle.Flat, BackColor = ui.ControlSurface, ForeColor = ui.PrimaryText };
-        cancel.FlatAppearance.BorderColor = ui.Divider;
-        cancel.FlatAppearance.MouseOverBackColor = ui.Hover;
-        var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true,
-            FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(4) };
-        footer.Controls.Add(cancel);
-        footer.Controls.Add(choose);
-        choose.FlatAppearance.BorderColor = ui.Divider;
-        choose.FlatAppearance.MouseOverBackColor = ui.Hover;
-        search.BackColor = ui.ControlSurface;
-        search.ForeColor = ui.PrimaryText;
-        var description = new Label { Name = "modeDescription", AccessibleName = "Selected mode purpose", Dock = DockStyle.Bottom,
-            Height = 76, Padding = new Padding(6), ForeColor = ui.PrimaryText };
-        var names = new List<string>();
-        list.SelectedIndexChanged += (sender, args) => description.Text = list.SelectedIndex < 0
-            ? string.Empty : GetModeDescription(names[list.SelectedIndex]);
-        void Filter()
-        {
-            names.Clear(); list.Items.Clear();
-            foreach (var mode in s_visualModes)
-            {
-                var label = DisplayChoice(mode, false, false);
-                if ((ModeGroup(mode) + " " + label).IndexOf(search.Text.Trim(), StringComparison.CurrentCultureIgnoreCase) < 0) continue;
-                names.Add(mode); list.Items.Add(ModeGroup(mode) + " \u00B7 " + label);
-            }
-            if (list.Items.Count > 0) list.SelectedIndex = 0;
-            choose.Enabled = list.Items.Count > 0;
-        }
-        search.TextChanged += (sender, args) => Filter();
-        list.DoubleClick += (sender, args) => { if (list.SelectedIndex >= 0) dialog.DialogResult = DialogResult.OK; };
-        dialog.Controls.Add(list); dialog.Controls.Add(search); dialog.Controls.Add(description); dialog.Controls.Add(footer);
-        dialog.AcceptButton = choose;
-        dialog.CancelButton = cancel;
-        Filter();
-        if (dialog.ShowDialog(this) == DialogResult.OK && list.SelectedIndex >= 0)
-            _modeSelector.SelectedItem = names[list.SelectedIndex];
+        using var dialog = CreateVisualizationBrowser();
+        dialog.ShowDialog(this);
     }
 
     private void SaveVisualizationImage()
@@ -1445,14 +1481,16 @@ public partial class FormAudioSpectrum : Form
                 if (_selectionPanel.Controls.GetChildIndex(_selectionControls[index]) != index)
                     _selectionPanel.Controls.SetChildIndex(_selectionControls[index], index);
             var width = ambiance_ThemeSpectrum.ClientSize.Width;
-            ambiance_ControlBox.Location = new Point(Math.Max(0, width - ambiance_ControlBox.Width - 8), 8);
-            // old-style chrome stays a fixed size even when WinForms scales the children
+            var chromeScale = DeviceDpi / 96f;
+            ambiance_ControlBox.Size = new Size((int)((ambiance_ControlBox.EnableMaximize ? 64 : 44) * chromeScale), (int)(22 * chromeScale));
+            ambiance_ControlBox.Location = new Point(Math.Max(0, width - ambiance_ControlBox.Width - (int)(8 * chromeScale)), (int)(8 * chromeScale));
+            // Native window actions scale with the actual monitor, independent of enlarged selector text.
             var windowButtons = ambiance_ControlBox.EnableMaximize
                 ? new[] { "minimizeButton", "maximizeButton", "closeButton" }
                 : new[] { "minimizeButton", "closeButton", "maximizeButton" };
             for (var i = 0; i < windowButtons.Length; i++)
                 if (ambiance_ControlBox.Controls[windowButtons[i]] is Button windowButton)
-                    windowButton.Bounds = new Rectangle(i * 22, 0, 20, 22);
+                    windowButton.Bounds = new Rectangle((int)(i * 22 * chromeScale), 0, (int)(20 * chromeScale), (int)(22 * chromeScale));
             var scale = Math.Max(1f, _modeSelector.Font.SizeInPoints / 9f);
             var selectors = new[] { _modeSelector, _styleSelector, _themeSelector };
             var minimumWidths = new[] { 210, 140, 180 };
@@ -1564,6 +1602,7 @@ public partial class FormAudioSpectrum : Form
                 _captureStatusLabel.Bounds = new Rectangle(12,
                     Math.Max(0, ambiance_ThemeSpectrum.Height - statusHeight - 4), Math.Max(1, width - 24), statusHeight);
             }
+            LayoutWorkspaceShell();
         }
         finally
         {
@@ -1747,6 +1786,9 @@ public partial class FormAudioSpectrum : Form
 
         var previousMode = _visualMode;
         _visualMode = mode;
+        _inspectedBand = -1;
+        _inspectedChannel = "Combined";
+        if (!_applyingRandomSelection) _catalog.RecordRecent(mode);
         UpdateModeDescription();
         var previousEffect = _visualStyle;
         _visualStyle = GetAppliedVisualStyle(_visualMode, _visualStyle);
@@ -1943,6 +1985,7 @@ public partial class FormAudioSpectrum : Form
             // set everything first, then notify, so nobody sees a half-applied state
             _effectFallbackMessage = null;
             _visualMode = selection.Mode;
+            _inspectedBand = -1; _inspectedChannel = "Combined";
             _visualStyle = selection.Style;
             _barTheme = selection.Theme;
             var theme = CurrentTheme();
@@ -2243,12 +2286,15 @@ public partial class FormAudioSpectrum : Form
         var dbLabelH = Math.Max(0, GetMaxDbAxisLabelHeight());
         var dbLabelHalf = (dbLabelH + 1) / 2;
         var baseStartY = Math.Max(0, (int)Math.Round(50f * scaleY));
-        var startY = Math.Max(baseStartY + dbLabelHalf, _selectionPanel.Bottom + dbLabelHalf + AXIS_LABEL_MIN_GAP);
+        var toolbarBottom = _captureBanner == null ? _selectionPanel.Bottom : _captureBanner.Bottom;
+        var startY = Math.Max(baseStartY + dbLabelHalf, toolbarBottom + dbLabelHalf + AXIS_LABEL_MIN_GAP);
         var actualAxisHeight = 0;
         foreach (var label in _axisLabels)
             actualAxisHeight = Math.Max(actualAxisHeight, label.PreferredHeight);
         var labelH = Math.Max(actualAxisHeight, Math.Max(10, (int)Math.Round(AXIS_LABEL_HEIGHT * scaleY)));
-        var statusReserve = _captureStatusLabel.Height + 4;
+        var inspectionReserve = _mainInspection != null && _mainInspection.Top < _captureStatusLabel.Top
+            ? _mainInspection.Height + 2 : 0;
+        var statusReserve = _captureStatusLabel.Height + 4 + inspectionReserve;
         var bottomReserve = Math.Max(0, (int)Math.Round(8f * scaleY)) + dbLabelHalf + AXIS_LABEL_MIN_GAP + labelH + statusReserve;
         var barH   = Math.Max(10, ch - startY - bottomReserve);
         var axisLabelY = Math.Min(ch - statusReserve - labelH - AXIS_LABEL_MIN_GAP,
@@ -2274,7 +2320,7 @@ public partial class FormAudioSpectrum : Form
                 var nextX = marginX + (int)Math.Round(calibrated ? SpectrumAxis.Position(plan[i].UpperHz) * availW : (i + 1) * strideF);
                 _progressBars[i].Location = new Point(x, startY);
                 _progressBars[i].Size     = new Size(Math.Max(1, nextX - x), barH);
-                _progressBars[i].Visible = !advancedMode && nextX > x;
+                _progressBars[i].Visible = _workspaceView == "Visualize" && !advancedMode && nextX > x;
                 _progressBars[i].GridlineLevels = calibrated ? s_gridlineLevels : SpectrumAxis.LegacyGridLevels;
                 _progressBars[i].VerticalGridlinePositions = calibrated
                     ? SpectrumAxis.LocalGridPositions(x - marginX, nextX - marginX, availW) : Array.Empty<float>();
@@ -2285,7 +2331,7 @@ public partial class FormAudioSpectrum : Form
                 _visualMode == "Stereo Spectrum"
                     ? Math.Max(1, ch - startY - statusReserve - (int)Math.Round(8 * scaleY))
                     : barH);
-            _advancedVisualizer.Visible = advancedMode;
+            _advancedVisualizer.Visible = _workspaceView == "Visualize" && advancedMode;
             _advancedVisualizer.SetBandPlan(_appliedPlan ?? _analyzer?.CurrentBandPlan ?? s_defaultPlan);
             LayoutAxisLabels(marginX, strideF, axisLabelY, cw);
 
@@ -2339,6 +2385,12 @@ public partial class FormAudioSpectrum : Form
         }
         finally
         {
+            if (_workspaceView != "Visualize")
+            {
+                HideFrequencyAxisLabels();
+                HideDbAxisLabels(_dbAxisLabelsLeft); HideDbAxisLabels(_dbAxisLabelsRight);
+                HideDbAxisLabels(_dbAxisLabelsLeftMirror); HideDbAxisLabels(_dbAxisLabelsRightMirror);
+            }
             ambiance_ThemeSpectrum.ResumeLayout(false);
         }
     }
@@ -2619,6 +2671,11 @@ public partial class FormAudioSpectrum : Form
                 _spectrumBuffer[i] = 0;
             _audioBuffer.CopyFrom(e.Audio);
             _spectrumPlanBuffer = e.Plan;
+            var raw = _pendingInspectionFrame;
+            _inspectionFrameBuffer = raw != null && e.Audio != null && raw.EndFrame == e.Audio.EndFrame &&
+                ReferenceEquals(raw.SourceEpoch, e.Audio.SourceEpoch) && raw.SampleRate == e.Audio.SampleRate &&
+                raw.Channels == e.Audio.Channels && ReferenceEquals(raw.Plan, e.Plan) ? raw : null;
+            _inspectionDeviceBuffer = _analyzer?.CurrentStatus.DeviceId;
 
             if (_displayFrozen) return;
             postNeeded = !_updatePending;
@@ -2648,6 +2705,8 @@ public partial class FormAudioSpectrum : Form
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ApplySpectrumToUI()
     {
+        AnalysisFrame inspectionFrame;
+        string inspectionDevice;
         lock (_updateLock)
         {
             _updatePending = false;
@@ -2655,10 +2714,13 @@ public partial class FormAudioSpectrum : Form
             Buffer.BlockCopy(_spectrumBuffer, 0, _applyBuffer, 0, BAR_COUNT);
             _audioApplyBuffer.CopyFrom(_audioBuffer);
             _appliedPlan = _spectrumPlanBuffer;
+            inspectionFrame = _inspectionFrameBuffer; inspectionDevice = _inspectionDeviceBuffer;
         }
 
         // the queued callback can fire after the form is already gone
         if (_isDisposed || _progressBars == null) return;
+        _displayedInspection = new MainSpectrumSnapshot(inspectionFrame,
+            _audioApplyBuffer.HasSevenBand ? _audioApplyBuffer.SevenBandPower : null, sourceDeviceId: inspectionDevice);
 
         var plan = _appliedPlan ?? _analyzer?.CurrentBandPlan;
         if (plan != null && !ReferenceEquals(plan, _layoutPlan))
@@ -2674,6 +2736,7 @@ public partial class FormAudioSpectrum : Form
             for (var i = 0; i < BAR_COUNT; i++)
                 _progressBars[i].SetTargetValueUI(_applyBuffer[i]);
         }
+        RefreshMainInspection();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -2706,6 +2769,7 @@ public partial class FormAudioSpectrum : Form
         _rotationSettingsButton.FlatAppearance.MouseOverBackColor = ui.Hover;
         _rotationSettingsButton.FlatAppearance.MouseDownBackColor = ui.Selection;
         _captureStatusLabel.ForeColor = ui.SecondaryText;
+        ApplyWorkspacePresentation(ui);
         UpdatePaletteHelp();
         foreach (var button in new[] { _guidesButton, _freezeButton, _pinButton, _viewButton })
         {
@@ -2845,6 +2909,7 @@ public partial class FormAudioSpectrum : Form
     {
         if (_isDisposed) return;
         _isDisposed = true;
+        _workspaceBrand?.Font.Dispose();
 
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
@@ -2853,6 +2918,8 @@ public partial class FormAudioSpectrum : Form
         _rotationTimer = null;
         _viewMenu?.Dispose();
         _viewMenu = null;
+        _mainSourceMenu?.Dispose();
+        _mainSourceMenu = null;
         _selectionToolTip?.Dispose();
         _selectionToolTip = null;
         _captureStatusTimer?.Stop();
@@ -2862,6 +2929,12 @@ public partial class FormAudioSpectrum : Form
         if (_analyzer != null)
         {
             Analyzer.OnChange -= Spectrum_Change;
+            _analyzer.AnalysisFrameAvailable -= ReceiveAnalysisFrame;
+            _analyzer.AnalysisUnavailable -= ReceiveAnalysisUnavailable;
+            _analysisWorkbench?.Close();
+            _analysisWorkbench?.Dispose();
+            _analysisWorkbench = null;
+            _analysisWorkspace = null;
             _analyzer.Dispose();
             _analyzer = null;
         }

@@ -419,7 +419,8 @@ public class SpectrumAxisPeakAcceptanceTests
                 var nearestGuideDistance = Enumerable.Range(0, 13)
                     .Min(index => Math.Abs(betweenRows - (plot.Top + plot.Height * index / 12d)));
                 Assert.True(nearestGuideDistance > 2,
-                    $"{control.Mode}: plot too short to distinguish adjacent grid rows.");
+                    $"{control.Mode}: plot too short to distinguish adjacent grid rows; " +
+                    $"plot {plot}, control {control.Bounds}, DPI {control.DeviceDpi}, font {control.Font.SizeInPoints}pt.");
                 Assert.False(HasRedNear(image, betweenColumns, betweenRows),
                     $"{control.Mode}: grid occupies the interior of calibrated cell {interval}.");
             }

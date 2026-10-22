@@ -47,7 +47,15 @@ public class PinLayoutRegressionTests
                 foreach (var width in widths)
                 {
                     form.ClientSize = new Size(width, 600);
+                    Application.DoEvents();
+                    Assert.True(GetClientRect(form.Handle, out var nativeClient));
+                    var actualClient = new Size(nativeClient.Right - nativeClient.Left, nativeClient.Bottom - nativeClient.Top);
+                    // Windows can cap a shown window below an oversized requested
+                    // width. Synchronize the managed size cache before recording
+                    // the baseline; pinning must preserve the actual native frame.
+                    if (form.ClientSize != actualClient) form.ClientSize = actualClient;
                     Reflow(form);
+                    Assert.Equal(actualClient, form.ClientSize);
                     var before = Geometry(form);
                     SaveEvidence(form, "Boundary-" + fontScale, form.ClientSize, "unpinned");
                     for (var repeat = 0; repeat < 20; repeat++)
@@ -89,7 +97,7 @@ public class PinLayoutRegressionTests
     }
 
     [Fact]
-    public void DefaultWindowKeepsTheToolbarInlineWithAReadableTitleInBothPinStates()
+    public void DefaultWindowKeepsNavigationAboveOneToolbarRowAndReadableBrandInBothPinStates()
     {
         CombinedRandomizationTests.RunOnSta(() =>
         {
@@ -98,9 +106,12 @@ public class PinLayoutRegressionTests
             Reflow(form);
             var panel = Field<FlowLayoutPanel>(form, "_selectionPanel");
             var theme = Field<Ambiance_ThemeContainer>(form, "ambiance_ThemeSpectrum");
-            Assert.Equal(7, panel.Top);
-            Assert.False(panel.WrapContents);
-            Assert.True(TextRenderer.MeasureText(theme.Text, theme.Font).Width <= theme.TitleRightInset - 16);
+            var navigation = Field<FlowLayoutPanel>(form, "_workspaceNavigation");
+            var brand = Field<Label>(form, "_workspaceBrand");
+            Assert.True(panel.Top >= navigation.Bottom);
+            Assert.True(brand.Right <= navigation.Left);
+            Assert.True(TextRenderer.MeasureText(brand.Text, brand.Font).Width <= brand.Width);
+            Assert.Equal(Field<ComboBox>(form, "_modeSelector").Top, Field<ComboBox>(form, "_themeSelector").Top);
             var before = Geometry(form);
             Call(form, "TogglePin");
             Assert.True(form.TopMost);
@@ -231,6 +242,12 @@ public class PinLayoutRegressionTests
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
     private static extern int GetWindowLong(IntPtr handle, int index);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { internal int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetClientRect(IntPtr window, out NativeRect bounds);
 
     private static T Field<T>(object target, string name) => CombinedRandomizationTests.GetField<T>(target, name);
     private static void Call(object target, string method) =>

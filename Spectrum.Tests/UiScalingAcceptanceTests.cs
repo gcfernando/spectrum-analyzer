@@ -186,7 +186,7 @@ public class UiScalingAcceptanceTests
             form.ClientSize = new Size(1920, 1080);
             ShowWithoutCapture(form);
             var fields = new[] { "_modeSelector", "_styleSelector", "_themeSelector" };
-            var keys = new[] { 'm', 'e', 'p' };
+            var keys = new[] { 'v', 's', 'p' };
             for (var i = 0; i < fields.Length; i++)
             {
                 var label = CombinedRandomizationTests.GetField<Label>(form, fields[i] + "Label");

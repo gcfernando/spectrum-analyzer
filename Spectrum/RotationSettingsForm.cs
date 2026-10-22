@@ -20,6 +20,7 @@ internal sealed class RotationSettingsForm : Form
         var ui = theme.Ui;
         // Fixed-size modal dialog, centered over the parent and kept out of the taskbar
         Text = "Mode, Style and Theme Rotation";
+        Icon = Properties.Resources.Spectrum;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
@@ -178,6 +179,13 @@ internal sealed class RotationSettingsForm : Form
         CancelButton = cancelButton;
         _interval.Enabled = randomEnabled;
         _randomOption.CheckedChanged += (sender, args) => _interval.Enabled = _randomOption.Checked;
+        ApplyPresentation(ui);
+    }
+
+    internal void ApplyPresentation(VisualTheme theme)
+    {
+        SharedPresentation.Apply(this, theme);
+        if (AcceptButton is Button apply) apply.BackColor = theme.Selection;
     }
 
     // What the caller reads after the dialog returns OK
