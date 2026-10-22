@@ -109,14 +109,14 @@ public static class CiDesktop {
                 virtualDevice = device;
         }
         if (String.IsNullOrEmpty(virtualDevice.Name)) return false;
-        // Stage a real 2560x1440 primary monitor. Do not fake screen metrics or alter tests.
+        // A 4K monitor retains room for the suite even with the runner's display scaling.
         var primary = new CiDisplayMode();
         primary.Size = 220;
         primary.Fields = 0x20 | 0x40000 | 0x80000 | 0x100000;
-        primary.Width = 2560; primary.Height = 1440; primary.BitsPerPixel = 32;
+        primary.Width = 3840; primary.Height = 2160; primary.BitsPerPixel = 32;
         int result = ChangeDisplaySettingsEx(virtualDevice.Name, ref primary, IntPtr.Zero, 0x10000011, IntPtr.Zero);
         if (result != 0) throw new InvalidOperationException("Cannot configure virtual primary display: " + result);
-        int x = 2560;
+        int x = 3840;
         foreach (var device in devices) {
             if (device.Name == virtualDevice.Name || (device.State & 1) == 0) continue;
             var mode = new CiDisplayMode(); mode.Size = 220;
