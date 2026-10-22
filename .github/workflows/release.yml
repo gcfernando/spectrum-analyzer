@@ -35,7 +35,33 @@ jobs:
         shell: powershell
         run: |
           # The default 1024x768 hosted desktop clamps the windows exercised by this suite.
-          Set-DisplayResolution -Width 2560 -Height 1440 -Force
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          [StructLayout(LayoutKind.Explicit, Size = 220)]
+          public struct DisplayMode {
+            [FieldOffset(68)] public ushort Size;
+            [FieldOffset(168)] public uint BitsPerPixel;
+            [FieldOffset(172)] public uint Width;
+            [FieldOffset(176)] public uint Height;
+          }
+          public static class DisplayModes {
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+            public static extern bool EnumDisplaySettings(string device, int index, ref DisplayMode mode);
+          }
+          '@
+          $modes = @()
+          for ($index = 0; ; $index++) {
+            $mode = New-Object DisplayMode
+            $mode.Size = 220
+            if (![DisplayModes]::EnumDisplaySettings($null, $index, [ref]$mode)) { break }
+            $modes += $mode
+          }
+          $modes | Select-Object Width, Height, BitsPerPixel -Unique | Format-Table
+          $target = $modes | Where-Object { $_.Width -ge 1920 -and $_.Height -ge 1440 -and $_.BitsPerPixel -eq 32 } |
+            Sort-Object { [long]$_.Width * $_.Height } | Select-Object -First 1
+          if (!$target) { throw 'The runner video device has no display mode large enough for the native UI tests.' }
+          Set-DisplayResolution -Width $target.Width -Height $target.Height -Force
           Start-Sleep -Seconds 2
           Add-Type -AssemblyName System.Windows.Forms
           $screen = [System.Windows.Forms.Screen]::PrimaryScreen
