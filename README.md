@@ -75,6 +75,8 @@ The installer checks for **.NET Framework 4.8 or later** and explains how to obt
 
 The [release pipeline](.github/workflows/release.yml) runs on every branch push and can also be started manually from GitHub Actions. It restores and builds Release with Visual Studio 2026 and C# 14 on Windows, runs the x86 regression suite, compiles an installer, checks installation/reinstallation and payload hashes, and verifies uninstallation before publishing a release. Builds from other branches are marked as prereleases. The newest successful default-branch build updates the permanent download link after verification; failures leave the previous download available, and slower older builds cannot replace a newer published build. Live-audio and separate desktop integration helpers are outside this pipeline.
 
+Native UI tests need more desktop space than the hosted runner's default display provides. [CI desktop setup](scripts/Configure-CiDesktop.ps1) provisions a signed virtual display on the disposable GitHub-hosted machine, with pinned dependency hashes and signature checks. This test dependency is excluded from the Spectrum installer and is not installed on end users' computers.
+
 The download link becomes available after this workflow is pushed and its first default-branch build publishes successfully. Public releases require a public repository and GitHub Actions permission to write repository contents; the publish jobs request that permission through the built-in `GITHUB_TOKEN`.
 
 <a id="requirements"></a>
