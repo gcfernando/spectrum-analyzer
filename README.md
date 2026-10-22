@@ -15,8 +15,6 @@ Spectrum is a real-time **audio spectrum analyzer and music visualizer for Windo
 
 Use **Visualize** for 21 visualization modes and 13 colour palettes, or open **Analyze**, **Compare**, and **Sessions** to inspect measurements, compare reference spectra, analyze audio files, and save local sessions. Playback and volume remain controlled by your source application or Windows.
 
-**[Download the latest Windows installer](https://github.com/gcfernando/spectrum-analyzer/releases/latest/download/SpectrumSetup.exe)** · [All builds and release notes](https://github.com/gcfernando/spectrum-analyzer/releases) · [Build status](https://github.com/gcfernando/spectrum-analyzer/actions/workflows/release.yml)
-
 ---
 
 <a id="overview"></a>
@@ -30,7 +28,7 @@ Use **Visualize** for 21 visualization modes and 13 colour palettes, or open **A
 
 ### 🧭 Navigation
 
-[Download](#download) · [Quick start](#quick-start) · [Features](#features) · [Workspaces](#workspaces) · [Requirements](#requirements) · [Build](#build) · [Run](#running) · [Modes](#modes) · [Screenshots](#gallery) · [Effects](#styles) · [Palettes](#themes) · [Configuration](#configuration) · [Tests](#tests) · [Architecture](#project-structure) · [Measurement](#measurement) · [FAQ](#faq)
+[Quick start](#quick-start) · [Features](#features) · [Workspaces](#workspaces) · [Requirements](#requirements) · [Build](#build) · [Run](#running) · [Modes](#modes) · [Screenshots](#gallery) · [Effects](#styles) · [Palettes](#themes) · [Configuration](#configuration) · [Tests](#tests) · [Architecture](#project-structure) · [Measurement](#measurement) · [FAQ](#faq)
 
 ### ⌨️ Keyboard Controls
 
@@ -51,7 +49,7 @@ Use **Visualize** for 21 visualization modes and 13 colour palettes, or open **A
 
 ### 🚀 Quick Start
 
-To install Spectrum, follow [Download and install](#download). To build it yourself:
+To build and run Spectrum:
 
 1. Check the [Windows and .NET Framework requirements](#requirements), then open [Spectrum.sln](Spectrum.sln) in Visual Studio 2026 with .NET desktop development tools.
 2. [Restore NuGet packages and build the Release configuration](#build).
@@ -63,22 +61,6 @@ To install Spectrum, follow [Download and install](#download). To build it yours
 
 ---
 
-<a id="download"></a>
-
-## Download and install
-
-1. Download **[SpectrumSetup.exe](https://github.com/gcfernando/spectrum-analyzer/releases/latest/download/SpectrumSetup.exe)** from the latest published default-branch build.
-2. Run the installer. It installs Spectrum for your Windows user, includes the required application DLLs and third-party notices, and adds a Start menu shortcut. Administrator access is not required.
-3. Launch **Spectrum** from the Start menu and play audio in your usual application. To remove it, use Windows **Installed apps**.
-
-The installer checks for **.NET Framework 4.8 or later** and explains how to obtain it if missing. It is currently unsigned. A `SpectrumSetup.exe.sha256` file accompanies each installer in [Releases](https://github.com/gcfernando/spectrum-analyzer/releases).
-
-The [release pipeline](.github/workflows/release.yml) runs on every branch push and can also be started manually from GitHub Actions. It restores and builds **.NET Framework 4.8 Release with an explicit x86 target** using Visual Studio 2026 and C# 14 on Windows. Before testing or packaging, it verifies that both compiled assemblies declare .NET Framework 4.8 and require x86. The Visual Studio VSTest runner executes the regression suite with `/Platform:x86` and `/Framework:.NETFramework,Version=v4.8`. The pipeline then compiles an installer, checks installation/reinstallation and payload hashes, and verifies uninstallation before publishing a release. Builds from other branches are marked as prereleases. The newest successful default-branch build updates the permanent download link after verification; failures leave the previous download available, and slower older builds cannot replace a newer published build. Live-audio and separate desktop integration helpers are outside this pipeline.
-
-Native UI tests need more desktop space than the hosted runner's default display provides. [CI desktop setup](scripts/Configure-CiDesktop.ps1) provisions a signed virtual display on the disposable GitHub-hosted machine, with pinned dependency hashes and signature checks. A hash-pinned [SetDPI utility](https://github.com/imniko/SetDPI) sets and verifies 100% display scaling for predictable test geometry. These test dependencies are excluded from the Spectrum installer and are not installed on end users' computers.
-
-The download link becomes available after this workflow is pushed and its first default-branch build publishes successfully. Public releases require a public repository and GitHub Actions permission to write repository contents; the publish jobs request that permission through the built-in `GITHUB_TOKEN`.
-
 <a id="requirements"></a>
 
 ## 📋 Requirements
@@ -86,7 +68,7 @@ The download link becomes available after this workflow is pushed and its first 
 > [!IMPORTANT]
 > The application targets **Windows** and **.NET Framework 4.8** and depends on the included native BASS libraries.
 
-- **To run:** Windows and [.NET Framework 4.8](https://dotnet.microsoft.com/download/dotnet-framework/net48). The installer includes the runtime DLLs; when using a manual build, keep the complete Release output folder, including the native x86 `bass.dll` and `basswasapi.dll` libraries.
+- **To run:** Windows and [.NET Framework 4.8](https://dotnet.microsoft.com/download/dotnet-framework/net48). Keep the complete Release output folder, including the native x86 `bass.dll` and `basswasapi.dll` libraries.
 - **To build:** Visual Studio 2026 with the .NET desktop development workload and .NET Framework 4.8 Developer/Targeting Pack, or equivalent full-framework MSBuild tools with a C# 14 compiler. Existing property accessors use C# 14's `field` keyword. The native references are included in `Spectrum\Ref_Files\`; restore the solution's NuGet dependencies before building.
 
 ---
